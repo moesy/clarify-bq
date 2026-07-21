@@ -65,10 +65,12 @@ FROM clarify_crm_latest.person;
 ```
 
 One view per object with typed columns generated from its schema, plus
-pass-through views for lists, users, activities, and the rest. Full history
-lives in `clarify_crm`: one day-partitioned table per resource, the complete
-payload in a JSON `data` column, every run identified by `run_id` in the
-`runs` ledger.
+pass-through views for lists, users, activities, and the rest. Each backup
+re-generates the view definitions so new CRM fields appear as columns
+automatically; `clarify-bq views` rebuilds them on demand (after `--no-views`,
+or to target another dataset with `--views-dataset`). Full history lives in
+`clarify_crm`: one day-partitioned table per resource, the complete payload in
+a JSON `data` column, every run identified by `run_id` in the `runs` ledger.
 
 ## Schedule
 
