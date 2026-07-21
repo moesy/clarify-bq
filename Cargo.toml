@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = ["crates/clarify-client", "crates/bq-sink", "crates/clarify-bq"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/fortya/clarify-bq"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "io-util", "time", "sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1", features = ["v7"] }
+gcp_auth = "0.12"
+clap = { version = "4", features = ["derive", "env"] }
+fs2 = "0.4"
+directories = "5"
+humantime = "2"
+futures = "0.3"
+async-trait = "0.1"
+base64 = "0.22"
+wiremock = "0.6"
+tempfile = "3"
