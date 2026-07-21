@@ -5,7 +5,7 @@ members = ["crates/clarify-client", "crates/bq-sink", "crates/clarify-bq"]
 [workspace.package]
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/fortya/clarify-bq"
+repository = "https://github.com/moesy/clarify-bq"
 
 [workspace.dependencies]
 anyhow = "1"
