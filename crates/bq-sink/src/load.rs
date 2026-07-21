@@ -22,10 +22,10 @@ pub fn split_points(path: &Path, max_bytes: u64) -> std::io::Result<Vec<(u64, u6
     let mut reader = BufReader::new(file);
     let mut ranges = Vec::new();
     let (mut start, mut pos) = (0u64, 0u64);
-    let mut line = String::new();
+    let mut line = Vec::new();
     loop {
         line.clear();
-        let n = reader.read_line(&mut line)? as u64;
+        let n = reader.read_until(b'\n', &mut line)? as u64;
         if n == 0 {
             if pos > start {
                 ranges.push((start, pos));
@@ -81,16 +81,15 @@ impl BqSink {
             }}
         });
         let boundary = "clarify_bq_boundary";
-        let mut body = Vec::new();
-        body.extend_from_slice(
-            format!(
-                "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{config}\r\n\
-                 --{boundary}\r\nContent-Type: application/octet-stream\r\n\r\n"
-            )
-            .as_bytes(),
+        let preamble = format!(
+            "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{config}\r\n\
+             --{boundary}\r\nContent-Type: application/octet-stream\r\n\r\n"
         );
+        let trailer = format!("\r\n--{boundary}--\r\n");
+        let mut body = Vec::with_capacity(preamble.len() + data.len() + trailer.len());
+        body.extend_from_slice(preamble.as_bytes());
         body.extend_from_slice(&data);
-        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        body.extend_from_slice(trailer.as_bytes());
 
         let url = format!(
             "{}/upload/bigquery/v2/projects/{}/jobs?uploadType=multipart",
@@ -122,22 +121,10 @@ impl BqSink {
     }
 
     async fn poll_job(&self, jid: &str) -> Result<u64, SinkError> {
-        let url = format!(
-            "{}/bigquery/v2/projects/{}/jobs/{}?location={}",
-            self.base, self.project, jid, self.location
-        );
+        let url = self.v2_url(&format!("/jobs/{}?location={}", jid, self.location));
         loop {
-            let token = self.bearer().await?;
-            let resp = self.http.get(&url).bearer_auth(token).send().await?;
-            let status = resp.status().as_u16();
-            let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
-            if !(200..300).contains(&status) {
-                return Err(SinkError::Http {
-                    status,
-                    url,
-                    body: body.to_string(),
-                });
-            }
+            let (status, body) = self.api(reqwest::Method::GET, url.clone(), None).await?;
+            Self::expect_ok(status, &url, &body)?;
             if body["status"]["state"] == "DONE" {
                 if let Some(err) = body["status"].get("errorResult").filter(|e| !e.is_null()) {
                     return Err(SinkError::JobFailed {

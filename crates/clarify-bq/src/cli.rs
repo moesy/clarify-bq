@@ -109,23 +109,16 @@ pub enum Command {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ExitCode {
-    Complete,
-    Failed,
-    Partial,
-    ConfigAuth,
-    ShrinkCheck,
-    LockHeld,
+    Complete = 0,
+    Failed = 1,
+    Partial = 2,
+    ConfigAuth = 3,
+    ShrinkCheck = 4,
+    LockHeld = 5,
 }
 
 impl ExitCode {
-    pub fn code(&self) -> i32 {
-        match self {
-            ExitCode::Complete => 0,
-            ExitCode::Failed => 1,
-            ExitCode::Partial => 2,
-            ExitCode::ConfigAuth => 3,
-            ExitCode::ShrinkCheck => 4,
-            ExitCode::LockHeld => 5,
-        }
+    pub fn code(self) -> i32 {
+        self as i32
     }
 }

@@ -8,6 +8,12 @@ pub struct Column {
     pub ty: &'static str,
 }
 
+impl Column {
+    pub const fn new(name: &'static str, ty: &'static str) -> Self {
+        Self { name, ty }
+    }
+}
+
 pub struct TableSpec {
     pub name: String,
     pub columns: Vec<Column>,
@@ -54,7 +60,19 @@ impl BqSink {
         self.provider.token().await
     }
 
-    async fn api(
+    /// Root for BigQuery v2 REST paths: `{base}/bigquery/v2/projects/{project}{tail}`.
+    pub(crate) fn v2_url(&self, tail: &str) -> String {
+        format!(
+            "{}/bigquery/v2/projects/{}{}",
+            self.base, self.project, tail
+        )
+    }
+
+    pub(crate) fn table_url(&self, table: &str) -> String {
+        self.v2_url(&format!("/datasets/{}/tables/{}", self.dataset, table))
+    }
+
+    pub(crate) async fn api(
         &self,
         method: reqwest::Method,
         url: String,
@@ -71,7 +89,11 @@ impl BqSink {
         Ok((status, body))
     }
 
-    fn expect_ok(status: u16, url: &str, body: &serde_json::Value) -> Result<(), SinkError> {
+    pub(crate) fn expect_ok(
+        status: u16,
+        url: &str,
+        body: &serde_json::Value,
+    ) -> Result<(), SinkError> {
         if (200..300).contains(&status) {
             Ok(())
         } else {
@@ -84,15 +106,11 @@ impl BqSink {
     }
 
     pub async fn ensure_dataset(&self) -> Result<(), SinkError> {
-        let dataset = self.dataset.clone();
-        self.ensure_dataset_named(&dataset).await
+        self.ensure_dataset_named(&self.dataset).await
     }
 
     pub async fn ensure_dataset_named(&self, dataset: &str) -> Result<(), SinkError> {
-        let get = format!(
-            "{}/bigquery/v2/projects/{}/datasets/{}",
-            self.base, self.project, dataset
-        );
+        let get = self.v2_url(&format!("/datasets/{dataset}"));
         let (status, body) = self.api(reqwest::Method::GET, get.clone(), None).await?;
         if status == 404 {
             tracing::warn!(
@@ -100,10 +118,7 @@ impl BqSink {
                 location = %self.location,
                 "creating dataset — location is immutable after creation"
             );
-            let url = format!(
-                "{}/bigquery/v2/projects/{}/datasets",
-                self.base, self.project
-            );
+            let url = self.v2_url("/datasets");
             let body = serde_json::json!({
                 "datasetReference": {"projectId": self.project, "datasetId": dataset},
                 "location": self.location
@@ -118,10 +133,7 @@ impl BqSink {
 
     /// Used by `check`'s permission probe to clean up its scratch table.
     pub async fn delete_table(&self, name: &str) -> Result<(), SinkError> {
-        let url = format!(
-            "{}/bigquery/v2/projects/{}/datasets/{}/tables/{}",
-            self.base, self.project, self.dataset, name
-        );
+        let url = self.table_url(name);
         let (status, body) = self.api(reqwest::Method::DELETE, url.clone(), None).await?;
         if status == 404 {
             return Ok(());
@@ -138,10 +150,7 @@ impl BqSink {
     }
 
     pub async fn ensure_table(&self, spec: &TableSpec) -> Result<(), SinkError> {
-        let tbl_url = format!(
-            "{}/bigquery/v2/projects/{}/datasets/{}/tables/{}",
-            self.base, self.project, self.dataset, spec.name
-        );
+        let tbl_url = self.table_url(&spec.name);
         let (status, body) = self
             .api(reqwest::Method::GET, tbl_url.clone(), None)
             .await?;
@@ -151,10 +160,7 @@ impl BqSink {
                 .iter()
                 .map(|c| serde_json::json!({"name": c.name, "type": c.ty}))
                 .collect();
-            let url = format!(
-                "{}/bigquery/v2/projects/{}/datasets/{}/tables",
-                self.base, self.project, self.dataset
-            );
+            let url = self.v2_url(&format!("/datasets/{}/tables", self.dataset));
             let body = serde_json::json!({
                 "tableReference": {
                     "projectId": self.project, "datasetId": self.dataset, "tableId": spec.name

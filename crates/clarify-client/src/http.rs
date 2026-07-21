@@ -7,21 +7,28 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct ClarifyClient {
     http: reqwest::Client,
     base: String,
-    api_key: String,
     pub workspace: String,
 }
 
 impl ClarifyClient {
     pub fn new(base_url: String, api_key: String, workspace: String) -> Result<Self, ClientError> {
+        let mut auth = reqwest::header::HeaderValue::from_str(&format!("api-key {api_key}"))
+            .map_err(|_| ClientError::Auth {
+                status: 0,
+                hint: "API key contains characters not valid in an HTTP header".into(),
+            })?;
+        auth.set_sensitive(true);
+        let headers =
+            reqwest::header::HeaderMap::from_iter([(reqwest::header::AUTHORIZATION, auth)]);
         // Clarify's edge rejects requests without a User-Agent (HTTP 403).
         let http = reqwest::Client::builder()
             .user_agent(concat!("clarify-bq/", env!("CARGO_PKG_VERSION")))
+            .default_headers(headers)
             .timeout(REQUEST_TIMEOUT)
             .build()?;
         Ok(Self {
             http,
             base: base_url.trim_end_matches('/').to_string(),
-            api_key,
             workspace,
         })
     }
@@ -46,22 +53,12 @@ impl ClarifyClient {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn url_for_test(&self, p: &str) -> String {
-        self.url(p)
-    }
-
     pub async fn get_json(&self, path_and_query: &str) -> Result<serde_json::Value, ClientError> {
         let url = self.url(path_and_query);
         let mut attempt = 0u32;
         loop {
             attempt += 1;
-            let resp = self
-                .http
-                .get(&url)
-                .header("Authorization", format!("api-key {}", self.api_key))
-                .send()
-                .await?;
+            let resp = self.http.get(&url).send().await?;
             let status = resp.status();
             if status.is_success() {
                 return Ok(resp.json().await?);
@@ -96,6 +93,18 @@ impl ClarifyClient {
             tokio::time::sleep(delay).await;
         }
     }
+
+    /// GET + typed parse with uniform shape-error reporting.
+    pub(crate) async fn get_parsed<T: serde::de::DeserializeOwned>(
+        &self,
+        path_and_query: &str,
+    ) -> Result<T, ClientError> {
+        let body = self.get_json(path_and_query).await?;
+        serde_json::from_value(body).map_err(|e| ClientError::Shape {
+            url: path_and_query.to_string(),
+            detail: e.to_string(),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -107,14 +116,14 @@ mod tests {
         let secure =
             ClarifyClient::new("https://api.example/v1".into(), "k".into(), "acme".into()).unwrap();
         assert_eq!(
-            secure.url_for_test("http://api.example/v1/workspaces/acme/x?page[offset]=500"),
+            secure.url("http://api.example/v1/workspaces/acme/x?page[offset]=500"),
             "https://api.example/v1/workspaces/acme/x?page[offset]=500"
         );
         // Local/test bases stay untouched.
         let plain =
             ClarifyClient::new("http://127.0.0.1:9999".into(), "k".into(), "acme".into()).unwrap();
         assert_eq!(
-            plain.url_for_test("http://127.0.0.1:9999/workspaces/acme/x"),
+            plain.url("http://127.0.0.1:9999/workspaces/acme/x"),
             "http://127.0.0.1:9999/workspaces/acme/x"
         );
     }

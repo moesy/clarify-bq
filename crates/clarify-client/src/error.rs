@@ -10,10 +10,10 @@ pub enum ClientError {
         url: String,
         attempts: u32,
     },
-    #[error("retry budget exhausted for {url}")]
-    RetriesExhausted { url: String },
     #[error("transport error: {0}")]
     Transport(#[from] reqwest::Error),
     #[error("unexpected response shape from {url}: {detail}")]
     Shape { url: String, detail: String },
+    #[error("delivering an item to the caller failed: {0}")]
+    Sink(#[from] std::io::Error),
 }

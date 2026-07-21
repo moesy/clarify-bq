@@ -1,3 +1,6 @@
+use crate::spool::RunSpool;
+use crate::tables::spec_for;
+use bq_sink::BqSink;
 use std::collections::HashMap;
 
 pub fn now_rfc3339() -> String {
@@ -100,6 +103,34 @@ pub fn parse_prev_counts(resources_json: &str) -> HashMap<String, u64> {
         }
     }
     out
+}
+
+/// Write a runs-ledger row: spool one NDJSON line, ensure the table, load it.
+/// Shared by the backup finalizer and `mark-complete`.
+pub async fn write_marker(
+    sink: &BqSink,
+    spool: &RunSpool,
+    row: &serde_json::Value,
+    run_id: &str,
+    job_key: &str,
+    attempts: u32,
+) -> Result<(), String> {
+    let path = {
+        let mut w = spool.writer("runs").map_err(|e| format!("spool: {e}"))?;
+        w.write_row(row).map_err(|e| format!("spool: {e}"))?;
+        w.finish().map_err(|e| format!("spool: {e}"))?.0
+    };
+    sink.ensure_table(&spec_for("runs", None))
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut last = String::new();
+    for _ in 0..attempts {
+        match sink.load_ndjson("runs", job_key, &path, run_id).await {
+            Ok(_) => return Ok(()),
+            Err(e) => last = e.to_string(),
+        }
+    }
+    Err(last)
 }
 
 #[cfg(test)]

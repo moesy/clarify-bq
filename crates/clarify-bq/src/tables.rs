@@ -2,6 +2,10 @@ use bq_sink::{Column, TableSpec};
 use clarify_client::ObjectSchema;
 use std::collections::HashMap;
 
+const fn col(name: &'static str, ty: &'static str) -> Column {
+    Column::new(name, ty)
+}
+
 pub fn sanitize(slug: &str) -> String {
     slug.to_lowercase()
         .chars()
@@ -17,130 +21,58 @@ pub fn sanitize(slug: &str) -> String {
 
 /// Map object slugs to their `records_*` table names, failing fast when two
 /// slugs collide after sanitization (silently commingled data otherwise).
-pub fn records_table_names(schemas: &[ObjectSchema]) -> Result<Vec<(String, String)>, String> {
-    let mut seen: HashMap<String, String> = HashMap::new();
-    let mut out = Vec::new();
+pub fn records_table_names(schemas: &[ObjectSchema]) -> Result<HashMap<String, String>, String> {
+    let mut by_table: HashMap<String, String> = HashMap::new();
+    let mut out = HashMap::new();
     for s in schemas {
         let table = format!("records_{}", sanitize(&s.slug));
-        if let Some(prev) = seen.insert(table.clone(), s.slug.clone()) {
+        if let Some(prev) = by_table.insert(table.clone(), s.slug.clone()) {
             return Err(format!(
                 "objects {prev:?} and {:?} both map to table {table:?} after sanitization; \
                  rename one in Clarify or back them up separately",
                 s.slug
             ));
         }
-        out.push((s.slug.clone(), table));
+        out.insert(s.slug.clone(), table);
     }
     Ok(out)
 }
 
-const BASE: [Column; 2] = [
-    Column {
-        name: "run_id",
-        ty: "STRING",
-    },
-    Column {
-        name: "snapshot_at",
-        ty: "TIMESTAMP",
-    },
-];
+const BASE: [Column; 2] = [col("run_id", "STRING"), col("snapshot_at", "TIMESTAMP")];
 
 pub fn spec_for(table: &str, expiration_days: Option<u32>) -> TableSpec {
     let mut cols: Vec<Column> = BASE.to_vec();
     let extra: &[Column] = match table {
-        t if t.starts_with("records_") => &[
-            Column {
-                name: "record_id",
-                ty: "STRING",
-            },
-            Column {
-                name: "object",
-                ty: "STRING",
-            },
-        ],
-        "schemas" => &[Column {
-            name: "object",
-            ty: "STRING",
-        }],
-        "lists" => &[
-            Column {
-                name: "list_id",
-                ty: "STRING",
-            },
-            Column {
-                name: "object",
-                ty: "STRING",
-            },
-        ],
+        t if t.starts_with("records_") => &[col("record_id", "STRING"), col("object", "STRING")],
+        "schemas" => &[col("object", "STRING")],
+        "lists" => &[col("list_id", "STRING"), col("object", "STRING")],
         "list_rows" => &[
-            Column {
-                name: "list_id",
-                ty: "STRING",
-            },
-            Column {
-                name: "object",
-                ty: "STRING",
-            },
-            Column {
-                name: "record_id",
-                ty: "STRING",
-            },
+            col("list_id", "STRING"),
+            col("object", "STRING"),
+            col("record_id", "STRING"),
         ],
-        "users" | "workflows" => &[Column {
-            name: "id",
-            ty: "STRING",
-        }],
+        "users" | "workflows" => &[col("id", "STRING")],
         "settings" => &[],
         "activities" => &[
-            Column {
-                name: "object",
-                ty: "STRING",
-            },
-            Column {
-                name: "record_id",
-                ty: "STRING",
-            },
-            Column {
-                name: "activity_id",
-                ty: "STRING",
-            },
+            col("object", "STRING"),
+            col("record_id", "STRING"),
+            col("activity_id", "STRING"),
         ],
         "attachments" => &[
-            Column {
-                name: "object",
-                ty: "STRING",
-            },
-            Column {
-                name: "record_id",
-                ty: "STRING",
-            },
-            Column {
-                name: "attachment_id",
-                ty: "STRING",
-            },
+            col("object", "STRING"),
+            col("record_id", "STRING"),
+            col("attachment_id", "STRING"),
         ],
         "runs" => &[
-            Column {
-                name: "finished_at",
-                ty: "TIMESTAMP",
-            },
-            Column {
-                name: "status",
-                ty: "STRING",
-            },
-            Column {
-                name: "resources",
-                ty: "JSON",
-            },
+            col("finished_at", "TIMESTAMP"),
+            col("status", "STRING"),
+            col("resources", "JSON"),
         ],
         other => unreachable!("unknown table shape: {other}"),
     };
     cols.extend_from_slice(extra);
     if table != "runs" {
-        cols.push(Column {
-            name: "data",
-            ty: "JSON",
-        });
+        cols.push(col("data", "JSON"));
     }
     TableSpec {
         name: table.to_string(),
@@ -177,6 +109,12 @@ mod tests {
     fn collision_after_sanitization_fails_naming_both() {
         let err = records_table_names(&[schema("sales-lead"), schema("sales_lead")]).unwrap_err();
         assert!(err.contains("sales-lead") && err.contains("sales_lead"));
+    }
+
+    #[test]
+    fn maps_slug_to_table() {
+        let names = records_table_names(&[schema("person")]).unwrap();
+        assert_eq!(names["person"], "records_person");
     }
 
     #[test]

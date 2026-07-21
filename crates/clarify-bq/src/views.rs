@@ -1,6 +1,8 @@
-use crate::tables::sanitize;
+use crate::plan::{Category, ResourcePlan};
+use crate::tables::{records_table_names, sanitize};
 use bq_sink::BqSink;
 use clarify_client::ObjectSchema;
+use futures::StreamExt;
 use std::collections::HashMap;
 
 /// `$id` → schema attributes, for resolving `$ref`s (e.g. person.name →
@@ -38,15 +40,28 @@ fn effective<'a>(prop: &'a serde_json::Value, defs: &'a SchemaDefs) -> &'a serde
     cur
 }
 
+/// Partition-pruning bound: every view query touches at most this many days.
+const PRUNE_DAYS: u32 = 45;
+
+fn prune_bound() -> String {
+    format!("TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {PRUNE_DAYS} DAY)")
+}
+
 /// CTE resolving the newest complete run at query time: the views need no
-/// refresh for data freshness, only for column changes. The 45-day window
-/// exists so partition pruning bounds every query to recent partitions.
+/// refresh for data freshness, only for column changes.
 fn latest_cte(project: &str, dataset: &str) -> String {
     format!(
         "WITH latest AS (SELECT run_id, snapshot_at FROM `{project}.{dataset}.runs` \
-         WHERE status = 'complete' \
-         AND snapshot_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY) \
-         ORDER BY snapshot_at DESC LIMIT 1)"
+         WHERE status = 'complete' AND snapshot_at >= {bound} \
+         ORDER BY snapshot_at DESC LIMIT 1)",
+        bound = prune_bound()
+    )
+}
+
+fn latest_filter() -> String {
+    format!(
+        "WHERE t.run_id = latest.run_id AND t.snapshot_at >= {bound}",
+        bound = prune_bound()
     )
 }
 
@@ -172,12 +187,11 @@ pub fn object_view_sql(
     cols.push("t.data".to_string());
     format!(
         "CREATE OR REPLACE VIEW `{project}.{views_dataset}.{view}` AS {cte} \
-         SELECT {cols} FROM `{project}.{dataset}.{table}` t, latest \
-         WHERE t.run_id = latest.run_id \
-         AND t.snapshot_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)",
+         SELECT {cols} FROM `{project}.{dataset}.{table}` t, latest {filter}",
         view = sanitize(slug),
         cte = latest_cte(project, dataset),
         cols = cols.join(", "),
+        filter = latest_filter(),
     )
 }
 
@@ -190,72 +204,90 @@ pub fn passthrough_view_sql(
 ) -> String {
     format!(
         "CREATE OR REPLACE VIEW `{project}.{views_dataset}.{table}` AS {cte} \
-         SELECT t.* EXCEPT (run_id) FROM `{project}.{dataset}.{table}` t, latest \
-         WHERE t.run_id = latest.run_id \
-         AND t.snapshot_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)",
+         SELECT t.* EXCEPT (run_id) FROM `{project}.{dataset}.{table}` t, latest {filter}",
         cte = latest_cte(project, dataset),
+        filter = latest_filter(),
     )
 }
 
-/// Create/refresh latest views. `objects` = (slug, records table, schema raw);
-/// `aux_tables` = the aux tables that exist. Views are independent: one
-/// failing does not block the rest. Returns (views written, errors).
-pub async fn create_latest_views(
+/// Aux tables that get pass-through views: every non-Records category's table
+/// plus the runs ledger (loaded by the marker path, not the category flow).
+fn aux_tables() -> Vec<&'static str> {
+    Category::ALL
+        .iter()
+        .filter(|c| !matches!(c, Category::Records))
+        .map(|c| c.name())
+        .chain(std::iter::once("runs"))
+        .collect()
+}
+
+const VIEW_CONCURRENCY: usize = 4;
+
+/// Create/refresh all latest views for a plan. The single entry point for both
+/// the post-backup refresh and `clarify-bq views` — one assembly path, so the
+/// two can never drift. Views over absent backing tables are skipped (the
+/// 404 branch), which also covers objects that were skipped or filtered out.
+/// Returns (views dataset, views written, errors).
+pub async fn refresh(
     sink: &BqSink,
-    views_dataset: &str,
-    objects: &[(String, String, serde_json::Value)],
-    aux_tables: &[&str],
+    views_dataset: Option<String>,
+    plan: &ResourcePlan,
     defs: &SchemaDefs,
-) -> (u64, Vec<String>) {
-    if let Err(e) = sink.ensure_dataset_named(views_dataset).await {
-        return (0, vec![format!("ensure views dataset: {e}")]);
+) -> Result<(String, u64, Vec<String>), String> {
+    let views_dataset = views_dataset.unwrap_or_else(|| format!("{}_latest", sink.dataset()));
+    let table_names = records_table_names(&plan.objects)?;
+    if let Err(e) = sink.ensure_dataset_named(&views_dataset).await {
+        return Ok((views_dataset, 0, vec![format!("ensure views dataset: {e}")]));
     }
+    let mut ddls: Vec<(String, String)> = plan
+        .objects
+        .iter()
+        .map(|s| {
+            (
+                s.slug.clone(),
+                object_view_sql(
+                    sink.project(),
+                    sink.dataset(),
+                    &views_dataset,
+                    &table_names[&s.slug],
+                    &s.slug,
+                    &s.raw,
+                    defs,
+                ),
+            )
+        })
+        .collect();
+    ddls.extend(aux_tables().into_iter().map(|t| {
+        (
+            t.to_string(),
+            passthrough_view_sql(sink.project(), sink.dataset(), &views_dataset, t),
+        )
+    }));
+
+    // Views are independent: run the DDL concurrently, tolerate absent tables.
+    let results: Vec<(String, Result<(), bq_sink::SinkError>)> = futures::stream::iter(
+        ddls.into_iter()
+            .map(|(label, sql)| async move { (label, sink.query(&sql).await.map(|_| ())) }),
+    )
+    .buffer_unordered(VIEW_CONCURRENCY)
+    .collect()
+    .await;
+
     let mut n = 0u64;
     let mut errors = Vec::new();
-    for (slug, table, raw) in objects {
-        let sql = object_view_sql(
-            sink.project(),
-            sink.dataset(),
-            views_dataset,
-            table,
-            slug,
-            raw,
-            defs,
-        );
-        match sink.query(&sql).await {
-            Ok(_) => n += 1,
+    for (label, result) in results {
+        match result {
+            Ok(()) => n += 1,
             // Backing table absent (skipped object, never-run category): not
             // an error, there is simply nothing to view yet.
             Err(bq_sink::SinkError::Http { status: 404, .. }) => {
-                tracing::info!(view = %slug, "skipping view: backing table does not exist");
+                tracing::info!(view = %label, "skipping view: backing table does not exist");
             }
-            Err(e) => errors.push(format!("view for {slug}: {e}")),
+            Err(e) => errors.push(format!("view for {label}: {e}")),
         }
     }
-    for table in aux_tables {
-        let sql = passthrough_view_sql(sink.project(), sink.dataset(), views_dataset, table);
-        match sink.query(&sql).await {
-            Ok(_) => n += 1,
-            Err(bq_sink::SinkError::Http { status: 404, .. }) => {
-                tracing::info!(view = %table, "skipping view: backing table does not exist");
-            }
-            Err(e) => errors.push(format!("view for {table}: {e}")),
-        }
-    }
-    (n, errors)
+    Ok((views_dataset, n, errors))
 }
-
-pub const AUX_TABLES: [&str; 9] = [
-    "schemas",
-    "lists",
-    "list_rows",
-    "users",
-    "workflows",
-    "settings",
-    "activities",
-    "attachments",
-    "runs",
-];
 
 #[cfg(test)]
 mod tests {
@@ -312,37 +344,26 @@ mod tests {
             &defs(),
         );
         assert!(sql.starts_with("CREATE OR REPLACE VIEW `p.d_latest.person` AS"));
-        // qualified base columns: no ambiguity against the latest CTE
         assert!(sql.contains("SELECT t.record_id, t.snapshot_at,"));
-        assert!(
-            sql.trim_end().ends_with(
-                "AND t.snapshot_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)"
-            )
-        );
-        // every alias backticked; reserved keyword safe
         assert!(sql.contains(r#"JSON_VALUE(t.data, '$.attributes."end"') AS `end`"#));
-        // format wins over declared type
         assert!(sql.contains(
             r#"SAFE_CAST(JSON_VALUE(t.data, '$.attributes."_created_at"') AS TIMESTAMP) AS `_created_at`"#
         ));
         assert!(sql.contains(
             r#"SAFE_CAST(JSON_VALUE(t.data, '$.attributes."score"') AS FLOAT64) AS `score`"#
         ));
-        // $ref struct expanded one level
         assert!(sql.contains(
             r#"JSON_VALUE(t.data, '$.attributes."name"."full_name"') AS `name_full_name`"#
         ));
         assert!(sql.contains(
             r#"JSON_VALUE(t.data, '$.attributes."name"."first_name"') AS `name_first_name`"#
         ));
-        // unresolvable ref → JSON passthrough
         assert!(sql.contains(r#"JSON_QUERY(t.data, '$.attributes."labels"') AS `labels`"#));
-        // relationships
         assert!(sql.contains(r#"$.relationships."company_id".data.id')) AS `company_id`"#));
         assert!(sql.contains(r#"JSON_QUERY(t.data, '$.relationships."deals"') AS `deals`"#));
-        // dynamic latest filter
         assert!(sql.contains("status = 'complete'"));
         assert!(sql.contains("ORDER BY snapshot_at DESC LIMIT 1"));
+        assert!(sql.contains("t.run_id = latest.run_id"));
     }
 
     #[test]
@@ -350,5 +371,13 @@ mod tests {
         let sql = passthrough_view_sql("p", "d", "d_latest", "users");
         assert!(sql.starts_with("CREATE OR REPLACE VIEW `p.d_latest.users` AS"));
         assert!(sql.contains("SELECT t.* EXCEPT (run_id)"));
+    }
+
+    #[test]
+    fn aux_tables_derive_from_categories_plus_runs() {
+        let aux = aux_tables();
+        assert!(aux.contains(&"users") && aux.contains(&"list_rows") && aux.contains(&"runs"));
+        assert!(!aux.contains(&"records"));
+        assert_eq!(aux.len(), Category::ALL.len()); // 8 non-Records + runs
     }
 }

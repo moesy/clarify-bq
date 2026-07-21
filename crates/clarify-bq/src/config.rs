@@ -1,5 +1,14 @@
 use crate::cli::ConnArgs;
-use bq_sink::SecretRef;
+use bq_sink::{SecretRef, TokenProvider, fetch_secret};
+
+/// Where the Clarify API key comes from — resolution guarantees exactly one.
+#[derive(Debug)]
+pub enum ApiKeySource {
+    /// CLARIFY_API_KEY env override (local escape hatch; no GCP needed).
+    Env(String),
+    /// Google Secret Manager reference.
+    Secret(SecretRef),
+}
 
 #[derive(Debug)]
 pub struct Config {
@@ -7,8 +16,7 @@ pub struct Config {
     pub project: String,
     pub dataset: String,
     pub location: String,
-    pub secret: Option<SecretRef>,
-    pub api_key_override: Option<String>,
+    pub key_source: ApiKeySource,
 }
 
 impl Config {
@@ -31,9 +39,11 @@ impl Config {
                 conn.dataset
             ));
         }
-        let secret = match (&conn.secret, &api_key_override) {
-            (Some(s), _) => Some(SecretRef::parse(s).map_err(|e| e.to_string())?),
-            (None, Some(_)) => None,
+        let key_source = match (api_key_override, &conn.secret) {
+            (Some(key), _) => ApiKeySource::Env(key),
+            (None, Some(s)) => {
+                ApiKeySource::Secret(SecretRef::parse(s).map_err(|e| e.to_string())?)
+            }
             (None, None) => {
                 return Err(
                     "either --secret (Secret Manager ref) or CLARIFY_API_KEY env must be set"
@@ -46,9 +56,23 @@ impl Config {
             project: conn.project.clone(),
             dataset: conn.dataset.clone(),
             location: conn.location.clone(),
-            secret,
-            api_key_override,
+            key_source,
         })
+    }
+
+    /// Fetch or return the API key. `provider` is only consulted for the
+    /// Secret Manager arm.
+    pub async fn api_key(
+        &self,
+        provider: &dyn TokenProvider,
+        secretmanager_base: &str,
+    ) -> Result<String, String> {
+        match &self.key_source {
+            ApiKeySource::Env(key) => Ok(key.clone()),
+            ApiKeySource::Secret(secret) => fetch_secret(secretmanager_base, provider, secret)
+                .await
+                .map_err(|e| format!("reading {}: {e}", secret.resource_name())),
+        }
     }
 }
 
@@ -69,14 +93,14 @@ mod tests {
     #[test]
     fn resolves_with_secret_ref() {
         let cfg = Config::resolve(&conn(Some("projects/demo-proj/secrets/k")), None).unwrap();
-        assert!(cfg.secret.is_some());
-        assert!(cfg.api_key_override.is_none());
+        assert!(matches!(cfg.key_source, ApiKeySource::Secret(_)));
     }
 
     #[test]
-    fn api_key_override_makes_secret_optional() {
-        let cfg = Config::resolve(&conn(None), Some("sk_local".into())).unwrap();
-        assert_eq!(cfg.api_key_override.as_deref(), Some("sk_local"));
+    fn api_key_override_wins_over_secret() {
+        let cfg =
+            Config::resolve(&conn(Some("projects/p/secrets/k")), Some("sk_local".into())).unwrap();
+        assert!(matches!(cfg.key_source, ApiKeySource::Env(ref k) if k == "sk_local"));
     }
 
     #[test]

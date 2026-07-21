@@ -18,7 +18,8 @@ impl FetchStats {
     }
 }
 
-pub type ItemSink<'a> = &'a mut (dyn FnMut(&serde_json::Value) -> std::io::Result<()> + Send);
+/// Receives each fetched item, owned — no copies are left behind in the client.
+pub type ItemSink<'a> = &'a mut (dyn FnMut(serde_json::Value) -> std::io::Result<()> + Send);
 
 impl ClarifyClient {
     pub async fn fetch_records(
@@ -50,19 +51,11 @@ impl ClarifyClient {
                 "{path}?page[limit]={PAGE_LIMIT}&page[offset]={offset}\
                  &sortOrder[column]=_created_at&sortOrder[dir]=ASC{include_q}"
             );
-            let body = self.get_json(&q).await?;
-            let env: ResourcesEnvelope =
-                serde_json::from_value(body).map_err(|e| ClientError::Shape {
-                    url: q.clone(),
-                    detail: e.to_string(),
-                })?;
+            let env: ResourcesEnvelope = self.get_parsed(&q).await?;
             expected = env.meta.total_records.or(expected);
             let n = env.data.len();
-            for item in &env.data {
-                on_item(item).map_err(|e| ClientError::Shape {
-                    url: q.clone(),
-                    detail: format!("sink error: {e}"),
-                })?;
+            for item in env.data {
+                on_item(item)?;
             }
             fetched += n as u64;
             // Advance by the returned count, never by the requested limit: the

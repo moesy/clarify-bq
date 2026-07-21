@@ -1,6 +1,6 @@
 use clap::Parser;
 use clarify_bq::cli::{Cli, Command, ConnArgs, ExitCode, Format};
-use clarify_bq::config::Config;
+use clarify_bq::config::{ApiKeySource, Config};
 use clarify_bq::{commands, orchestrate, spool};
 use std::sync::Arc;
 
@@ -54,23 +54,17 @@ async fn gcp(cfg: &Config) -> Gcp {
     Gcp { provider, sink }
 }
 
-async fn clarify_client(
-    cfg: &Config,
-    provider: &Arc<dyn bq_sink::TokenProvider>,
-) -> clarify_client::ClarifyClient {
-    let api_key = match (&cfg.api_key_override, &cfg.secret) {
-        (Some(key), _) => key.clone(),
-        (None, Some(secret)) => {
-            match bq_sink::fetch_secret(SECRETMANAGER_BASE, provider.as_ref(), secret).await {
-                Ok(k) => k,
-                Err(e) => exit_config(&format!("reading {}: {e}", secret.resource_name())),
-            }
-        }
-        (None, None) => unreachable!("Config::resolve guarantees one source"),
-    };
+fn make_client(cfg: &Config, api_key: String) -> clarify_client::ClarifyClient {
     match clarify_client::ClarifyClient::new(CLARIFY_BASE.into(), api_key, cfg.workspace.clone()) {
         Ok(c) => c,
         Err(e) => exit_config(&e.to_string()),
+    }
+}
+
+async fn clarify_client(cfg: &Config, gcp: &Gcp) -> clarify_client::ClarifyClient {
+    match cfg.api_key(gcp.provider.as_ref(), SECRETMANAGER_BASE).await {
+        Ok(key) => make_client(cfg, key),
+        Err(e) => exit_config(&e),
     }
 }
 
@@ -90,7 +84,7 @@ async fn main() {
         Command::Backup(args) => {
             let cfg = resolve(&args.conn);
             let g = gcp(&cfg).await;
-            let client = clarify_client(&cfg, &g.provider).await;
+            let client = clarify_client(&cfg, &g).await;
             let spool_root = args
                 .spool_dir
                 .clone()
@@ -136,19 +130,13 @@ async fn main() {
         }
         Command::Objects { conn } => {
             let cfg = resolve(conn);
-            let client = if cfg.api_key_override.is_some() {
-                // No GCP needed when the key comes from the environment.
-                match clarify_client::ClarifyClient::new(
-                    CLARIFY_BASE.into(),
-                    cfg.api_key_override.clone().expect("checked above"),
-                    cfg.workspace.clone(),
-                ) {
-                    Ok(c) => c,
-                    Err(e) => exit_config(&e.to_string()),
+            // The env-override path needs no GCP setup at all.
+            let client = match &cfg.key_source {
+                ApiKeySource::Env(key) => make_client(&cfg, key.clone()),
+                ApiKeySource::Secret(_) => {
+                    let g = gcp(&cfg).await;
+                    clarify_client(&cfg, &g).await
                 }
-            } else {
-                let g = gcp(&cfg).await;
-                clarify_client(&cfg, &g.provider).await
             };
             let (exit, out) = commands::run_objects(&client).await;
             print!("{out}");
@@ -182,7 +170,7 @@ async fn main() {
         } => {
             let cfg = resolve(conn);
             let g = gcp(&cfg).await;
-            let client = clarify_client(&cfg, &g.provider).await;
+            let client = clarify_client(&cfg, &g).await;
             let (exit, out) = commands::run_views(&client, &g.sink, views_dataset.clone()).await;
             print!("{out}");
             exit

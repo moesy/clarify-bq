@@ -1,10 +1,17 @@
 use crate::cli::ExitCode;
-use crate::config::Config;
+use crate::config::{ApiKeySource, Config};
 use crate::spool::RunSpool;
-use bq_sink::{BqSink, Column, SinkError, TableSpec, TokenProvider, fetch_secret};
-use clarify_client::ClarifyClient;
+use bq_sink::{BqSink, SinkError, TableSpec, TokenProvider};
+use clarify_client::{ClarifyClient, ClientError};
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
+
+fn client_error_exit(e: &ClientError) -> ExitCode {
+    match e {
+        ClientError::Auth { .. } => ExitCode::ConfigAuth,
+        _ => ExitCode::Failed,
+    }
+}
 
 /// `clarify-bq objects` — list discoverable object types.
 pub async fn run_objects(client: &ClarifyClient) -> (ExitCode, String) {
@@ -21,34 +28,49 @@ pub async fn run_objects(client: &ClarifyClient) -> (ExitCode, String) {
             }
             (ExitCode::Complete, out)
         }
-        Err(e @ clarify_client::ClientError::Auth { .. }) => (ExitCode::ConfigAuth, e.to_string()),
-        Err(e) => (ExitCode::Failed, e.to_string()),
+        Err(e) => (client_error_exit(&e), e.to_string()),
     }
 }
 
-fn check_table_spec() -> TableSpec {
-    TableSpec {
-        name: "_clarify_bq_check".into(),
-        columns: vec![
-            Column {
-                name: "run_id",
-                ty: "STRING",
+/// Report accumulator for `check`: every probe is recorded, any failure
+/// flips the exit to ConfigAuth.
+struct CheckReport {
+    text: String,
+    failed: bool,
+}
+
+impl CheckReport {
+    fn new() -> Self {
+        Self {
+            text: String::new(),
+            failed: false,
+        }
+    }
+
+    fn step(&mut self, name: &str, result: Result<String, String>) {
+        match result {
+            Ok(detail) => self.text.push_str(&format!("ok    {name}: {detail}\n")),
+            Err(e) => {
+                self.failed = true;
+                self.text.push_str(&format!("FAIL  {name}: {e}\n"));
+            }
+        }
+    }
+
+    fn finish(self) -> (ExitCode, String) {
+        (
+            if self.failed {
+                ExitCode::ConfigAuth
+            } else {
+                ExitCode::Complete
             },
-            Column {
-                name: "snapshot_at",
-                ty: "TIMESTAMP",
-            },
-            Column {
-                name: "data",
-                ty: "JSON",
-            },
-        ],
-        partition_expiration_days: Some(1),
+            self.text,
+        )
     }
 }
 
 /// `clarify-bq check` — probe the real permissions on both sides, creating
-/// nothing permanent. Every probe is reported; any failure exits 3.
+/// nothing permanent.
 pub async fn run_check(
     cfg: &Config,
     provider: &dyn TokenProvider,
@@ -56,41 +78,27 @@ pub async fn run_check(
     clarify_base: &str,
     sink: &BqSink,
 ) -> (ExitCode, String) {
-    let mut report = String::new();
-    let mut failed = false;
-    let mut step = |report: &mut String, name: &str, result: Result<String, String>| match result {
-        Ok(detail) => report.push_str(&format!("ok    {name}: {detail}\n")),
-        Err(e) => {
-            failed = true;
-            report.push_str(&format!("FAIL  {name}: {e}\n"));
-        }
-    };
+    let mut report = CheckReport::new();
 
     // 1. Clarify API key (Secret Manager unless env override).
-    let api_key = match (&cfg.api_key_override, &cfg.secret) {
-        (Some(key), _) => {
-            step(
-                &mut report,
+    let api_key = match &cfg.key_source {
+        ApiKeySource::Env(key) => {
+            report.step(
                 "secret",
                 Ok("skipped (CLARIFY_API_KEY env override)".into()),
             );
             Some(key.clone())
         }
-        (None, Some(secret)) => match fetch_secret(secretmanager_base, provider, secret).await {
+        ApiKeySource::Secret(secret) => match cfg.api_key(provider, secretmanager_base).await {
             Ok(key) => {
-                step(
-                    &mut report,
-                    "secret",
-                    Ok(format!("read {}", secret.resource_name())),
-                );
+                report.step("secret", Ok(format!("read {}", secret.resource_name())));
                 Some(key)
             }
             Err(e) => {
-                step(&mut report, "secret", Err(e.to_string()));
+                report.step("secret", Err(e));
                 None
             }
         },
-        (None, None) => unreachable!("Config::resolve guarantees one source"),
     };
 
     // 2. Clarify schema fetch.
@@ -108,9 +116,9 @@ pub async fn run_check(
             slugs.dedup();
             Ok::<_, String>(format!("{} record objects discovered", slugs.len()))
         };
-        step(&mut report, "clarify", probe.await);
+        report.step("clarify", probe.await);
     } else {
-        step(&mut report, "clarify", Err("skipped: no API key".into()));
+        report.step("clarify", Err("skipped: no API key".into()));
     }
 
     // 3. Dataset reachable + query permission. A missing dataset is not a
@@ -121,8 +129,7 @@ pub async fn run_check(
         sink.dataset()
     );
     let mut dataset_absent = false;
-    step(
-        &mut report,
+    report.step(
         "dataset",
         match sink.query(&sql).await {
             Ok(_) => Ok(format!("{}.{} reachable", sink.project(), sink.dataset())),
@@ -140,39 +147,22 @@ pub async fn run_check(
 
     // 4. Table create permission (scratch table, removed immediately).
     if dataset_absent {
-        step(
-            &mut report,
-            "tables",
-            Ok("skipped: dataset does not exist yet".into()),
-        );
-        return (
-            if failed {
-                ExitCode::ConfigAuth
-            } else {
-                ExitCode::Complete
-            },
-            report,
-        );
+        report.step("tables", Ok("skipped: dataset does not exist yet".into()));
+        return report.finish();
     }
     let probe = async {
-        sink.ensure_table(&check_table_spec())
-            .await
-            .map_err(|e| e.to_string())?;
+        let spec = TableSpec {
+            name: "_clarify_bq_check".into(),
+            ..crate::tables::spec_for("settings", Some(1))
+        };
+        sink.ensure_table(&spec).await.map_err(|e| e.to_string())?;
         sink.delete_table("_clarify_bq_check")
             .await
             .map_err(|e| e.to_string())?;
         Ok::<_, String>("create+delete _clarify_bq_check".to_string())
     };
-    step(&mut report, "tables", probe.await);
-
-    (
-        if failed {
-            ExitCode::ConfigAuth
-        } else {
-            ExitCode::Complete
-        },
-        report,
-    )
+    report.step("tables", probe.await);
+    report.finish()
 }
 
 /// `clarify-bq views` — create/refresh the latest-snapshot flat views from the
@@ -184,48 +174,36 @@ pub async fn run_views(
 ) -> (ExitCode, String) {
     let schemas = match client.fetch_schemas().await {
         Ok(s) => s,
-        Err(e @ clarify_client::ClientError::Auth { .. }) => {
-            return (ExitCode::ConfigAuth, e.to_string());
-        }
-        Err(e) => return (ExitCode::Failed, e.to_string()),
+        Err(e) => return (client_error_exit(&e), e.to_string()),
     };
     let plan = match crate::plan::ResourcePlan::build(&schemas, &[], &[]) {
         Ok(p) => p,
         Err(e) => return (ExitCode::ConfigAuth, e),
     };
-    let table_names = match crate::tables::records_table_names(&plan.objects) {
-        Ok(t) => t,
-        Err(e) => return (ExitCode::ConfigAuth, e),
-    };
-    let objects: Vec<(String, String, serde_json::Value)> = plan
-        .objects
-        .iter()
-        .filter_map(|s| {
-            let table = table_names.iter().find(|(sl, _)| sl == &s.slug)?.1.clone();
-            Some((s.slug.clone(), table, s.raw.clone()))
-        })
-        .collect();
-    let views_dataset = views_dataset.unwrap_or_else(|| format!("{}_latest", sink.dataset()));
-    let (n, errors) = crate::views::create_latest_views(
+    match crate::views::refresh(
         sink,
-        &views_dataset,
-        &objects,
-        &crate::views::AUX_TABLES,
+        views_dataset,
+        &plan,
         &crate::views::schema_defs(&schemas),
     )
-    .await;
-    let mut out = format!("{n} view(s) refreshed in {views_dataset}\n");
-    for e in &errors {
-        out.push_str(&format!("FAIL  {e}\n"));
+    .await
+    {
+        Ok((dataset, n, errors)) => {
+            let mut out = format!("{n} view(s) refreshed in {dataset}\n");
+            for e in &errors {
+                out.push_str(&format!("FAIL  {e}\n"));
+            }
+            (
+                if errors.is_empty() {
+                    ExitCode::Complete
+                } else {
+                    ExitCode::Partial
+                },
+                out,
+            )
+        }
+        Err(e) => (ExitCode::ConfigAuth, e),
     }
-    (
-        if errors.is_empty() {
-            ExitCode::Complete
-        } else {
-            ExitCode::Partial
-        },
-        out,
-    )
 }
 
 /// `clarify-bq mark-complete <run_id>` — repair a run whose data loaded but
@@ -248,27 +226,18 @@ pub async fn run_mark_complete(
     let (secs, nanos) = ts.to_unix();
     let snapshot_at =
         humantime::format_rfc3339_seconds(UNIX_EPOCH + Duration::new(secs, nanos)).to_string();
-    let finished_at = crate::runs::now_rfc3339();
 
     let row = serde_json::json!({
         "run_id": run_id,
         "snapshot_at": snapshot_at,
-        "finished_at": finished_at,
+        "finished_at": crate::runs::now_rfc3339(),
         "status": "complete",
         "resources": {"repaired": true},
     });
     let result = async {
         let spool = RunSpool::create(spool_root, &format!("repair-{run_id}"))
             .map_err(|e| format!("spool: {e}"))?;
-        let mut w = spool.writer("runs").map_err(|e| format!("spool: {e}"))?;
-        w.write_row(&row).map_err(|e| format!("spool: {e}"))?;
-        let (path, _) = w.finish().map_err(|e| format!("spool: {e}"))?;
-        sink.ensure_table(&crate::tables::spec_for("runs", None))
-            .await
-            .map_err(|e| e.to_string())?;
-        sink.load_ndjson("runs", "runs_repair", &path, run_id)
-            .await
-            .map_err(|e| e.to_string())?;
+        crate::runs::write_marker(sink, &spool, &row, run_id, "runs_repair", 1).await?;
         let _ = spool.remove();
         Ok::<_, String>(())
     }
