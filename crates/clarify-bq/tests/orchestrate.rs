@@ -246,6 +246,90 @@ async fn aux_failure_is_partial_exit() {
 }
 
 #[tokio::test]
+async fn object_without_records_endpoint_is_skipped_not_failed() {
+    let clarify = MockServer::start().await;
+    let bq = MockServer::start().await;
+    mock_clarify_happy(&clarify).await;
+    mock_bq(&bq).await;
+    // Discovery also returns an object whose records endpoint 404s (like
+    // Clarify's agent feature).
+    clarify.reset().await;
+    mock_clarify_happy(&clarify).await;
+    Mock::given(method("GET"))
+        .and(path("/workspaces/acme/schemas"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": [
+                {"type": "schema", "id": "https://example.test/schemas/entities/person",
+                 "attributes": {"title": "person", "xClarifyNamespace": "objects",
+                    "properties": {"company_id": {"xClarifyRelationship": {"entity": "company"}}}}},
+                {"type": "schema", "id": "https://example.test/schemas/entities/ghost",
+                 "attributes": {"title": "ghost", "xClarifyNamespace": "objects", "properties": {}}}
+            ],
+            "links": {"next": null}
+        })))
+        .with_priority(1)
+        .mount(&clarify)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/workspaces/acme/objects/ghost/resources"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&clarify)
+        .await;
+    let (client, sink) = harness(&clarify, &bq);
+    let spool = tempfile::tempdir().unwrap();
+
+    let result = run_backup(&client, &sink, &args(false), spool.path()).await;
+    assert_eq!(
+        result.exit,
+        ExitCode::Complete,
+        "summary: {}",
+        result.summary
+    );
+    assert_eq!(
+        outcome(&result.summary, "records_ghost")["status"],
+        "skipped"
+    );
+    assert_eq!(outcome(&result.summary, "records_person")["status"], "ok");
+}
+
+#[tokio::test]
+async fn single_bad_record_feed_is_skipped_and_marked_dirty() {
+    let clarify = MockServer::start().await;
+    let bq = MockServer::start().await;
+    mock_clarify_happy(&clarify).await;
+    mock_bq(&bq).await;
+    // rec_1's activity feed is broken server-side; rec_2's works.
+    Mock::given(method("GET"))
+        .and(path(
+            "/workspaces/acme/objects/person/records/rec_1/activities",
+        ))
+        .respond_with(ResponseTemplate::new(404))
+        .with_priority(1)
+        .mount(&clarify)
+        .await;
+    let (client, sink) = harness(&clarify, &bq);
+    let spool = tempfile::tempdir().unwrap();
+
+    let result = run_backup(&client, &sink, &args(false), spool.path()).await;
+    assert_eq!(
+        result.exit,
+        ExitCode::Complete,
+        "summary: {}",
+        result.summary
+    );
+    let act = outcome(&result.summary, "activities:person");
+    assert_eq!(act["status"], "ok");
+    assert_eq!(act["count"], 1, "rec_2's activity still captured");
+    assert_eq!(act["consistency"], "dirty");
+    assert!(
+        act["error"]
+            .as_str()
+            .unwrap()
+            .contains("1 record feed(s) skipped")
+    );
+}
+
+#[tokio::test]
 async fn records_failure_is_failed_exit() {
     let clarify = MockServer::start().await;
     let bq = MockServer::start().await;

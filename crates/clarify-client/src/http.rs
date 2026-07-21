@@ -28,7 +28,15 @@ impl ClarifyClient {
 
     fn url(&self, path_and_query: &str) -> String {
         // links.next comes back absolute; everything else is workspace-relative.
-        if path_and_query.starts_with("http://") || path_and_query.starts_with("https://") {
+        // The API has been seen returning http:// next-links; when we talk to
+        // an https base, upgrade them (port 80 is not served).
+        if let Some(rest) = path_and_query.strip_prefix("http://") {
+            if self.base.starts_with("https://") {
+                return format!("https://{rest}");
+            }
+            return path_and_query.to_string();
+        }
+        if path_and_query.starts_with("https://") {
             path_and_query.to_string()
         } else {
             format!(
@@ -36,6 +44,11 @@ impl ClarifyClient {
                 self.base, self.workspace, path_and_query
             )
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn url_for_test(&self, p: &str) -> String {
+        self.url(p)
     }
 
     pub async fn get_json(&self, path_and_query: &str) -> Result<serde_json::Value, ClientError> {
@@ -82,5 +95,27 @@ impl ClarifyClient {
             );
             tokio::time::sleep(delay).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn http_next_links_upgrade_to_https_only_on_https_base() {
+        let secure =
+            ClarifyClient::new("https://api.example/v1".into(), "k".into(), "acme".into()).unwrap();
+        assert_eq!(
+            secure.url_for_test("http://api.example/v1/workspaces/acme/x?page[offset]=500"),
+            "https://api.example/v1/workspaces/acme/x?page[offset]=500"
+        );
+        // Local/test bases stay untouched.
+        let plain =
+            ClarifyClient::new("http://127.0.0.1:9999".into(), "k".into(), "acme".into()).unwrap();
+        assert_eq!(
+            plain.url_for_test("http://127.0.0.1:9999/workspaces/acme/x"),
+            "http://127.0.0.1:9999/workspaces/acme/x"
+        );
     }
 }

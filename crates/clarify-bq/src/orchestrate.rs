@@ -89,7 +89,10 @@ async fn fetch_object(
     let mut record_ids: Vec<String> = Vec::new();
 
     let records_result = async {
-        let mut w = ctx.spool.writer(table).map_err(|e| format!("spool: {e}"))?;
+        let mut w = ctx.spool.writer(table).map_err(|e| ClientError::Shape {
+            url: table.into(),
+            detail: format!("spool: {e}"),
+        })?;
         let stats = ctx
             .client
             .fetch_records(&slug, &schema.relationships, &mut |item| {
@@ -101,13 +104,18 @@ async fn fetch_object(
                 record_ids.push(id);
                 w.write_row(&serde_json::Value::Object(row))
             })
-            .await
-            .map_err(|e| e.to_string())?;
-        let (path, _) = w.finish().map_err(|e| format!("spool: {e}"))?;
-        Ok::<_, String>((stats, path))
+            .await?;
+        let (path, _) = w.finish().map_err(|e| ClientError::Shape {
+            url: table.into(),
+            detail: format!("spool: {e}"),
+        })?;
+        Ok::<_, ClientError>((stats, path))
     }
     .await;
 
+    // Some discovered objects have no records endpoint at all (e.g. Clarify's
+    // agent feature): a 404 means "not backupable", which must not fail every
+    // scheduled run. Skip it, loudly.
     let records_ok = records_result.is_ok();
     match records_result {
         Ok((stats, path)) => products.push(SpoolProduct {
@@ -121,11 +129,27 @@ async fn fetch_object(
                 Ok((stats.fetched, stats.expected, stats.consistency())),
             ),
         }),
+        Err(ClientError::Http { status: 404, .. }) => {
+            tracing::warn!(object = %slug, "skipping object: no records endpoint (404)");
+            let mut o = ctx.outcome(
+                table,
+                table,
+                started,
+                Err("object has no records endpoint (404); skipped".into()),
+            );
+            o.status = "skipped".into();
+            products.push(SpoolProduct {
+                resource: table.to_string(),
+                table: table.to_string(),
+                path: None,
+                outcome: o,
+            });
+        }
         Err(e) => products.push(SpoolProduct {
             resource: table.to_string(),
             table: table.to_string(),
             path: None,
-            outcome: ctx.outcome(table, table, started, Err(e)),
+            outcome: ctx.outcome(table, table, started, Err(e.to_string())),
         }),
     }
 
@@ -153,10 +177,14 @@ async fn fetch_object(
         }
         let result = fetch_per_record(ctx, kind, id_col, &slug, &record_ids, &spool_key).await;
         let (path, outcome) = match result {
-            Ok((path, count)) => (
-                Some(path),
-                ctx.outcome(&resource, kind, started, Ok((count, None, "clean"))),
-            ),
+            Ok((path, count, errors, last_err)) => {
+                let consistency = if errors == 0 { "clean" } else { "dirty" };
+                let mut o = ctx.outcome(&resource, kind, started, Ok((count, None, consistency)));
+                if errors > 0 {
+                    o.error = Some(format!("{errors} record feed(s) skipped; last: {last_err}"));
+                }
+                (Some(path), o)
+            }
             Err(e) => (None, ctx.outcome(&resource, kind, started, Err(e))),
         };
         products.push(SpoolProduct {
@@ -169,6 +197,9 @@ async fn fetch_object(
     products
 }
 
+/// Fan out over records; a single record's failing feed (server bug, deleted
+/// mid-run) is skipped and reported, not fatal. Only every-record-failing is a
+/// resource failure. Returns (spool path, rows, skipped feeds, last error).
 async fn fetch_per_record(
     ctx: &FetchCtx<'_>,
     kind: &str,
@@ -176,12 +207,14 @@ async fn fetch_per_record(
     slug: &str,
     record_ids: &[String],
     spool_key: &str,
-) -> Result<(PathBuf, u64), String> {
+) -> Result<(PathBuf, u64, u64, String), String> {
     let mut w = ctx
         .spool
         .writer(spool_key)
         .map_err(|e| format!("spool: {e}"))?;
     let mut count = 0u64;
+    let mut errors = 0u64;
+    let mut last_err = String::new();
     for rid in record_ids {
         let write = |w: &mut SpoolWriter, item: &serde_json::Value| {
             let mut row = ctx.base_row();
@@ -202,12 +235,24 @@ async fn fetch_per_record(
                     .fetch_record_attachments(slug, rid, &mut |item| write(&mut w, item))
                     .await
             }
+        };
+        match stats {
+            Ok(stats) => count += stats.fetched,
+            Err(e) => {
+                errors += 1;
+                last_err = e.to_string();
+                tracing::warn!(object = %slug, record = %rid, kind, error = %last_err,
+                    "skipping one record's feed");
+            }
         }
-        .map_err(|e| e.to_string())?;
-        count += stats.fetched;
+    }
+    if errors > 0 && count == 0 && errors == record_ids.len() as u64 {
+        return Err(format!(
+            "every record's {kind} feed failed; last: {last_err}"
+        ));
     }
     let (path, _) = w.finish().map_err(|e| format!("spool: {e}"))?;
-    Ok((path, count))
+    Ok((path, count, errors, last_err))
 }
 
 /// Fetch a flat resource (lists, users, workflows, settings, schemas snapshot,
