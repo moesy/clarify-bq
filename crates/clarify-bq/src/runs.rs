@@ -24,7 +24,9 @@ impl ResourceOutcome {
 }
 
 pub fn overall_status(outcomes: &[ResourceOutcome]) -> &'static str {
-    let records_failed = outcomes.iter().any(|o| o.is_records() && o.status == "failed");
+    let records_failed = outcomes
+        .iter()
+        .any(|o| o.is_records() && o.status == "failed");
     if records_failed {
         "failed"
     } else if outcomes.iter().any(|o| o.status == "failed") {
@@ -123,7 +125,7 @@ mod tests {
         let ok = outcome("records_person", "records_person", "ok", 5);
         let aux_fail = outcome("users", "users", "failed", 0);
         let rec_fail = outcome("records_person", "records_person", "failed", 0);
-        assert_eq!(overall_status(&[ok.clone()]), "complete");
+        assert_eq!(overall_status(std::slice::from_ref(&ok)), "complete");
         assert_eq!(overall_status(&[ok.clone(), aux_fail.clone()]), "partial");
         assert_eq!(overall_status(&[rec_fail, aux_fail]), "failed");
     }

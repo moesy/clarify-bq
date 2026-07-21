@@ -14,9 +14,11 @@ impl ClarifyClient {
         let mut next: Option<String> = Some(path.to_string());
         while let Some(url) = next {
             let body = self.get_json(&url).await?;
-            let env: LinkedEnvelope = serde_json::from_value(body).map_err(|e| {
-                ClientError::Shape { url: url.clone(), detail: e.to_string() }
-            })?;
+            let env: LinkedEnvelope =
+                serde_json::from_value(body).map_err(|e| ClientError::Shape {
+                    url: url.clone(),
+                    detail: e.to_string(),
+                })?;
             for item in &env.data {
                 on_item(item).map_err(|e| ClientError::Shape {
                     url: url.clone(),
@@ -26,7 +28,10 @@ impl ClarifyClient {
             fetched += env.data.len() as u64;
             next = env.links.next;
         }
-        Ok(FetchStats { fetched, expected: None })
+        Ok(FetchStats {
+            fetched,
+            expected: None,
+        })
     }
 
     /// Workspace settings: a plain document, not a JSON:API collection.
@@ -54,8 +59,11 @@ impl ClarifyClient {
         record_id: &str,
         on_item: ItemSink<'_>,
     ) -> Result<FetchStats, ClientError> {
-        self.fetch_linked(&format!("/objects/{object}/records/{record_id}/activities"), on_item)
-            .await
+        self.fetch_linked(
+            &format!("/objects/{object}/records/{record_id}/activities"),
+            on_item,
+        )
+        .await
     }
 
     pub async fn fetch_record_attachments(
@@ -64,7 +72,10 @@ impl ClarifyClient {
         record_id: &str,
         on_item: ItemSink<'_>,
     ) -> Result<FetchStats, ClientError> {
-        self.fetch_linked(&format!("/objects/{object}/records/{record_id}/attachments"), on_item)
-            .await
+        self.fetch_linked(
+            &format!("/objects/{object}/records/{record_id}/attachments"),
+            on_item,
+        )
+        .await
     }
 }

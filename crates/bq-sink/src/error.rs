@@ -5,7 +5,11 @@ pub enum SinkError {
     #[error("GCP auth: {0}")]
     Auth(String),
     #[error("HTTP {status} from {url}: {body}")]
-    Http { status: u16, url: String, body: String },
+    Http {
+        status: u16,
+        url: String,
+        body: String,
+    },
     #[error("transport: {0}")]
     Transport(#[from] reqwest::Error),
     #[error("config: {0}")]

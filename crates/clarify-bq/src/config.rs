@@ -21,7 +21,11 @@ impl Config {
         if conn.project.trim().is_empty() {
             return Err("--project is required".into());
         }
-        if !conn.dataset.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        if !conn
+            .dataset
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
             return Err(format!(
                 "dataset {:?} is invalid: BigQuery dataset IDs allow letters, digits, underscore only",
                 conn.dataset
@@ -32,7 +36,8 @@ impl Config {
             (None, Some(_)) => None,
             (None, None) => {
                 return Err(
-                    "either --secret (Secret Manager ref) or CLARIFY_API_KEY env must be set".into(),
+                    "either --secret (Secret Manager ref) or CLARIFY_API_KEY env must be set"
+                        .into(),
                 );
             }
         };

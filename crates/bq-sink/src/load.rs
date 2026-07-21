@@ -8,7 +8,12 @@ use std::time::Duration;
 pub const MAX_CHUNK_BYTES: u64 = 90 * 1024 * 1024;
 
 pub fn job_id(run_id: &str, job_key: &str, chunk: usize) -> String {
-    format!("clarify_bq_{}_{}_{}", run_id.replace('-', "_"), job_key, chunk)
+    format!(
+        "clarify_bq_{}_{}_{}",
+        run_id.replace('-', "_"),
+        job_key,
+        chunk
+    )
 }
 
 /// Byte ranges on line boundaries, each at most `max_bytes` long.
@@ -96,7 +101,10 @@ impl BqSink {
             .http
             .post(&url)
             .bearer_auth(token)
-            .header("Content-Type", format!("multipart/related; boundary={boundary}"))
+            .header(
+                "Content-Type",
+                format!("multipart/related; boundary={boundary}"),
+            )
             .body(body)
             .send()
             .await?;
@@ -124,7 +132,11 @@ impl BqSink {
             let status = resp.status().as_u16();
             let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
             if !(200..300).contains(&status) {
-                return Err(SinkError::Http { status, url, body: body.to_string() });
+                return Err(SinkError::Http {
+                    status,
+                    url,
+                    body: body.to_string(),
+                });
             }
             if body["status"]["state"] == "DONE" {
                 if let Some(err) = body["status"].get("errorResult").filter(|e| !e.is_null()) {
@@ -144,16 +156,29 @@ impl BqSink {
 
     /// Run a SQL query; rows come back as arrays of `rows[].f[].v` values.
     pub async fn query(&self, sql: &str) -> Result<Vec<Vec<serde_json::Value>>, SinkError> {
-        let url = format!("{}/bigquery/v2/projects/{}/queries", self.base, self.project);
+        let url = format!(
+            "{}/bigquery/v2/projects/{}/queries",
+            self.base, self.project
+        );
         let body = serde_json::json!({
             "query": sql, "useLegacySql": false, "location": self.location
         });
         let token = self.bearer().await?;
-        let resp = self.http.post(&url).bearer_auth(token).json(&body).send().await?;
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await?;
         let status = resp.status().as_u16();
         let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
         if !(200..300).contains(&status) {
-            return Err(SinkError::Http { status, url, body: body.to_string() });
+            return Err(SinkError::Http {
+                status,
+                url,
+                body: body.to_string(),
+            });
         }
         let empty = Vec::new();
         Ok(body["rows"]
@@ -161,7 +186,8 @@ impl BqSink {
             .unwrap_or(&empty)
             .iter()
             .map(|r| {
-                r["f"].as_array()
+                r["f"]
+                    .as_array()
                     .unwrap_or(&empty)
                     .iter()
                     .map(|c| c["v"].clone())
@@ -194,7 +220,10 @@ mod tests {
     #[test]
     fn job_ids_are_deterministic_and_legal() {
         let id = job_id("0198f0aa-1111-7abc-8def-0123456789ab", "records_person", 0);
-        assert_eq!(id, "clarify_bq_0198f0aa_1111_7abc_8def_0123456789ab_records_person_0");
+        assert_eq!(
+            id,
+            "clarify_bq_0198f0aa_1111_7abc_8def_0123456789ab_records_person_0"
+        );
         assert!(id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
     }
 }

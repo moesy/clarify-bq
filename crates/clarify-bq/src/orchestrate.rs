@@ -51,9 +51,13 @@ impl FetchCtx<'_> {
         result: Result<(u64, Option<u64>, &'static str), String>,
     ) -> ResourceOutcome {
         let (status, count, expected, consistency, error) = match result {
-            Ok((count, expected, consistency)) => {
-                ("ok".to_string(), count, expected, consistency.to_string(), None)
-            }
+            Ok((count, expected, consistency)) => (
+                "ok".to_string(),
+                count,
+                expected,
+                consistency.to_string(),
+                None,
+            ),
             Err(e) => ("failed".to_string(), 0, None, "n/a".to_string(), Some(e)),
         };
         ResourceOutcome {
@@ -85,10 +89,7 @@ async fn fetch_object(
     let mut record_ids: Vec<String> = Vec::new();
 
     let records_result = async {
-        let mut w = ctx
-            .spool
-            .writer(table)
-            .map_err(|e| format!("spool: {e}"))?;
+        let mut w = ctx.spool.writer(table).map_err(|e| format!("spool: {e}"))?;
         let stats = ctx
             .client
             .fetch_records(&slug, &schema.relationships, &mut |item| {
@@ -142,7 +143,12 @@ async fn fetch_object(
             // Without the record list there is nothing to fan out over.
             let mut o = ctx.outcome(&resource, kind, started, Err("records fetch failed".into()));
             o.status = "skipped".into();
-            products.push(SpoolProduct { resource, table: kind.into(), path: None, outcome: o });
+            products.push(SpoolProduct {
+                resource,
+                table: kind.into(),
+                path: None,
+                outcome: o,
+            });
             continue;
         }
         let result = fetch_per_record(ctx, kind, id_col, &slug, &record_ids, &spool_key).await;
@@ -153,7 +159,12 @@ async fn fetch_object(
             ),
             Err(e) => (None, ctx.outcome(&resource, kind, started, Err(e))),
         };
-        products.push(SpoolProduct { resource, table: kind.into(), path, outcome });
+        products.push(SpoolProduct {
+            resource,
+            table: kind.into(),
+            path,
+            outcome,
+        });
     }
     products
 }
@@ -166,7 +177,10 @@ async fn fetch_per_record(
     record_ids: &[String],
     spool_key: &str,
 ) -> Result<(PathBuf, u64), String> {
-    let mut w = ctx.spool.writer(spool_key).map_err(|e| format!("spool: {e}"))?;
+    let mut w = ctx
+        .spool
+        .writer(spool_key)
+        .map_err(|e| format!("spool: {e}"))?;
     let mut count = 0u64;
     for rid in record_ids {
         let write = |w: &mut SpoolWriter, item: &serde_json::Value| {
@@ -205,19 +219,28 @@ async fn fetch_flat(
 ) -> SpoolProduct {
     let started = now_rfc3339();
     let result = async {
-        let mut w = ctx.spool.writer(resource).map_err(|e| format!("spool: {e}"))?;
+        let mut w = ctx
+            .spool
+            .writer(resource)
+            .map_err(|e| format!("spool: {e}"))?;
         let count = fetch(&mut w).await?;
         let (path, _) = w.finish().map_err(|e| format!("spool: {e}"))?;
         Ok::<_, String>((path, count))
     }
     .await;
     let (path, outcome) = match result {
-        Ok((path, count)) => {
-            (Some(path), ctx.outcome(resource, resource, started, Ok((count, None, "clean"))))
-        }
+        Ok((path, count)) => (
+            Some(path),
+            ctx.outcome(resource, resource, started, Ok((count, None, "clean"))),
+        ),
         Err(e) => (None, ctx.outcome(resource, resource, started, Err(e))),
     };
-    SpoolProduct { resource: resource.into(), table: resource.into(), path, outcome }
+    SpoolProduct {
+        resource: resource.into(),
+        table: resource.into(),
+        path,
+        outcome,
+    }
 }
 
 pub struct RunResult {
@@ -288,7 +311,12 @@ pub async fn run_backup(
         Ok(s) => s,
         Err(e) => return fail(format!("spool: {e}"), ExitCode::Failed),
     };
-    let ctx = FetchCtx { client, spool: &spool, run_id: &run_id, snapshot_at: &snapshot_at };
+    let ctx = FetchCtx {
+        client,
+        spool: &spool,
+        run_id: &run_id,
+        snapshot_at: &snapshot_at,
+    };
 
     // ---- Fetch phase ----
     let mut products: Vec<SpoolProduct> = Vec::new();
@@ -332,8 +360,10 @@ pub async fn run_backup(
             let stats = ctx
                 .client
                 .fetch_linked("/lists", &mut |item| {
-                    let entity =
-                        item["attributes"]["entity"].as_str().unwrap_or_default().to_string();
+                    let entity = item["attributes"]["entity"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string();
                     let id = json_id(item);
                     lists.push((entity.clone(), id.clone()));
                     let mut row = ctx.base_row();
@@ -380,9 +410,10 @@ pub async fn run_backup(
             );
         }
     }
-    for (cat, path, id_col) in
-        [(Category::Users, "/users", "id"), (Category::Workflows, "/workflows", "id")]
-    {
+    for (cat, path, id_col) in [
+        (Category::Users, "/users", "id"),
+        (Category::Workflows, "/workflows", "id"),
+    ] {
         if !plan.includes(cat) {
             continue;
         }
@@ -407,10 +438,15 @@ pub async fn run_backup(
     if plan.includes(Category::Settings) {
         products.push(
             fetch_flat(&ctx, "settings", async |w| {
-                let doc = ctx.client.fetch_settings().await.map_err(|e| e.to_string())?;
+                let doc = ctx
+                    .client
+                    .fetch_settings()
+                    .await
+                    .map_err(|e| e.to_string())?;
                 let mut row = ctx.base_row();
                 row.insert("data".into(), doc);
-                w.write_row(&serde_json::Value::Object(row)).map_err(|e| format!("spool: {e}"))?;
+                w.write_row(&serde_json::Value::Object(row))
+                    .map_err(|e| format!("spool: {e}"))?;
                 Ok(1)
             })
             .await,
@@ -449,7 +485,10 @@ pub async fn run_backup(
     // ---- Shrink check ----
     let mut violations: Vec<String> = Vec::new();
     if !args.no_shrink_check && status == "complete" {
-        let prev = match sink.query(&prev_run_sql(&sink_project(sink), &sink_dataset(sink))).await {
+        let prev = match sink
+            .query(&prev_run_sql(&sink_project(sink), &sink_dataset(sink)))
+            .await
+        {
             Ok(rows) => rows
                 .first()
                 .and_then(|r| r.first())
@@ -480,7 +519,9 @@ pub async fn run_backup(
             w.write_row(&row).map_err(|e| format!("spool: {e}"))?;
             w.finish().map_err(|e| format!("spool: {e}"))?.0
         };
-        sink.ensure_table(&spec_for("runs", None)).await.map_err(|e| e.to_string())?;
+        sink.ensure_table(&spec_for("runs", None))
+            .await
+            .map_err(|e| e.to_string())?;
         let mut last = String::new();
         for _ in 0..3 {
             match sink.load_ndjson("runs", "runs", &w_path, &run_id).await {
@@ -502,10 +543,10 @@ pub async fn run_backup(
         };
     }
 
-    if status == "complete" {
-        if let Err(e) = spool.remove() {
-            tracing::warn!(error = %e, "spool cleanup failed (will be swept next run)");
-        }
+    if status == "complete"
+        && let Err(e) = spool.remove()
+    {
+        tracing::warn!(error = %e, "spool cleanup failed (will be swept next run)");
     }
 
     let exit = match status {

@@ -75,7 +75,11 @@ impl BqSink {
         if (200..300).contains(&status) {
             Ok(())
         } else {
-            Err(SinkError::Http { status, url: url.to_string(), body: body.to_string() })
+            Err(SinkError::Http {
+                status,
+                url: url.to_string(),
+                body: body.to_string(),
+            })
         }
     }
 
@@ -91,12 +95,17 @@ impl BqSink {
                 location = %self.location,
                 "creating dataset — location is immutable after creation"
             );
-            let url = format!("{}/bigquery/v2/projects/{}/datasets", self.base, self.project);
+            let url = format!(
+                "{}/bigquery/v2/projects/{}/datasets",
+                self.base, self.project
+            );
             let body = serde_json::json!({
                 "datasetReference": {"projectId": self.project, "datasetId": self.dataset},
                 "location": self.location
             });
-            let (s, b) = self.api(reqwest::Method::POST, url.clone(), Some(body)).await?;
+            let (s, b) = self
+                .api(reqwest::Method::POST, url.clone(), Some(body))
+                .await?;
             return Self::expect_ok(s, &url, &b);
         }
         Self::expect_ok(status, &get, &body)
@@ -118,8 +127,7 @@ impl BqSink {
     fn partitioning_json(spec: &TableSpec) -> serde_json::Value {
         let mut tp = serde_json::json!({"type": "DAY", "field": "snapshot_at"});
         if let Some(days) = spec.partition_expiration_days {
-            tp["expirationMs"] =
-                serde_json::Value::String((days as u64 * 86_400_000).to_string());
+            tp["expirationMs"] = serde_json::Value::String((days as u64 * 86_400_000).to_string());
         }
         tp
     }
@@ -129,7 +137,9 @@ impl BqSink {
             "{}/bigquery/v2/projects/{}/datasets/{}/tables/{}",
             self.base, self.project, self.dataset, spec.name
         );
-        let (status, body) = self.api(reqwest::Method::GET, tbl_url.clone(), None).await?;
+        let (status, body) = self
+            .api(reqwest::Method::GET, tbl_url.clone(), None)
+            .await?;
         if status == 404 {
             let fields: Vec<_> = spec
                 .columns
@@ -148,14 +158,18 @@ impl BqSink {
                 "timePartitioning": Self::partitioning_json(spec),
                 "clustering": {"fields": ["run_id"]}
             });
-            let (s, b) = self.api(reqwest::Method::POST, url.clone(), Some(body)).await?;
+            let (s, b) = self
+                .api(reqwest::Method::POST, url.clone(), Some(body))
+                .await?;
             return Self::expect_ok(s, &url, &b);
         }
         Self::expect_ok(status, &tbl_url, &body)?;
         // Re-assert expiration so a changed --partition-expiration-days takes effect.
         if spec.partition_expiration_days.is_some() {
             let body = serde_json::json!({"timePartitioning": Self::partitioning_json(spec)});
-            let (s, b) = self.api(reqwest::Method::PATCH, tbl_url.clone(), Some(body)).await?;
+            let (s, b) = self
+                .api(reqwest::Method::PATCH, tbl_url.clone(), Some(body))
+                .await?;
             return Self::expect_ok(s, &tbl_url, &b);
         }
         Ok(())

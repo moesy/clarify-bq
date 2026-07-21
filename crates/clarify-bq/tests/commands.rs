@@ -58,7 +58,9 @@ async fn check_reports_probes_and_fails_on_denied_dataset() {
         .await;
     // Table create probe succeeds.
     Mock::given(method("GET"))
-        .and(path_regex(r"^/bigquery/v2/projects/proj/datasets/ds/tables/[^/]+$"))
+        .and(path_regex(
+            r"^/bigquery/v2/projects/proj/datasets/ds/tables/[^/]+$",
+        ))
         .respond_with(ResponseTemplate::new(404))
         .mount(&gcp)
         .await;
@@ -68,7 +70,9 @@ async fn check_reports_probes_and_fails_on_denied_dataset() {
         .mount(&gcp)
         .await;
     Mock::given(method("DELETE"))
-        .and(path_regex(r"^/bigquery/v2/projects/proj/datasets/ds/tables/[^/]+$"))
+        .and(path_regex(
+            r"^/bigquery/v2/projects/proj/datasets/ds/tables/[^/]+$",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
         .mount(&gcp)
         .await;

@@ -50,7 +50,11 @@ pub async fn fetch_secret(
         secret.resource_name()
     );
     let token = provider.token().await?;
-    let resp = reqwest::Client::new().get(&url).bearer_auth(&token).send().await?;
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .bearer_auth(&token)
+        .send()
+        .await?;
     let status = resp.status();
     if !status.is_success() {
         return Err(SinkError::Http {

@@ -48,7 +48,14 @@ async fn retries_5xx_up_to_budget_then_errors() {
         .mount(&server)
         .await;
     let err = client(&server).get_json("/users").await.unwrap_err();
-    assert!(matches!(err, ClientError::Http { status: 503, attempts: 5, .. }));
+    assert!(matches!(
+        err,
+        ClientError::Http {
+            status: 503,
+            attempts: 5,
+            ..
+        }
+    ));
 }
 
 #[tokio::test]

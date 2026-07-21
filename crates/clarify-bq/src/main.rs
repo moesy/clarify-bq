@@ -18,7 +18,10 @@ fn init_tracing(cli: &Cli) {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level));
     match cli.log_format {
-        Format::Json => tracing_subscriber::fmt().with_env_filter(filter).json().init(),
+        Format::Json => tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .json()
+            .init(),
         Format::Text => tracing_subscriber::fmt().with_env_filter(filter).init(),
     }
 }
@@ -51,7 +54,10 @@ async fn gcp(cfg: &Config) -> Gcp {
     Gcp { provider, sink }
 }
 
-async fn clarify_client(cfg: &Config, provider: &Arc<dyn bq_sink::TokenProvider>) -> clarify_client::ClarifyClient {
+async fn clarify_client(
+    cfg: &Config,
+    provider: &Arc<dyn bq_sink::TokenProvider>,
+) -> clarify_client::ClarifyClient {
     let api_key = match (&cfg.api_key_override, &cfg.secret) {
         (Some(key), _) => key.clone(),
         (None, Some(secret)) => {
@@ -85,14 +91,19 @@ async fn main() {
             let cfg = resolve(&args.conn);
             let g = gcp(&cfg).await;
             let client = clarify_client(&cfg, &g.provider).await;
-            let spool_root =
-                args.spool_dir.clone().unwrap_or_else(spool::default_spool_root);
+            let spool_root = args
+                .spool_dir
+                .clone()
+                .unwrap_or_else(spool::default_spool_root);
             let run = orchestrate::run_backup(&client, &g.sink, args, &spool_root);
             let result = match args.timeout {
                 Some(dur) => match tokio::time::timeout(dur, run).await {
                     Ok(r) => r,
                     Err(_) => {
-                        eprintln!("run deadline of {} exceeded", humantime::format_duration(dur));
+                        eprintln!(
+                            "run deadline of {} exceeded",
+                            humantime::format_duration(dur)
+                        );
                         std::process::exit(ExitCode::Failed.code());
                     }
                 },
@@ -104,7 +115,9 @@ async fn main() {
                     println!(
                         "run {} finished: {}",
                         result.summary["run_id"].as_str().unwrap_or("?"),
-                        result.summary["status"].as_str().unwrap_or("see errors above")
+                        result.summary["status"]
+                            .as_str()
+                            .unwrap_or("see errors above")
                     );
                     if let Some(resources) = result.summary["resources"].as_array() {
                         for r in resources {
@@ -144,9 +157,14 @@ async fn main() {
         Command::Check { conn } => {
             let cfg = resolve(conn);
             let g = gcp(&cfg).await;
-            let (exit, report) =
-                commands::run_check(&cfg, g.provider.as_ref(), SECRETMANAGER_BASE, CLARIFY_BASE, &g.sink)
-                    .await;
+            let (exit, report) = commands::run_check(
+                &cfg,
+                g.provider.as_ref(),
+                SECRETMANAGER_BASE,
+                CLARIFY_BASE,
+                &g.sink,
+            )
+            .await;
             print!("{report}");
             exit
         }

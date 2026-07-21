@@ -25,9 +25,18 @@ fn check_table_spec() -> TableSpec {
     TableSpec {
         name: "_clarify_bq_check".into(),
         columns: vec![
-            Column { name: "run_id", ty: "STRING" },
-            Column { name: "snapshot_at", ty: "TIMESTAMP" },
-            Column { name: "data", ty: "JSON" },
+            Column {
+                name: "run_id",
+                ty: "STRING",
+            },
+            Column {
+                name: "snapshot_at",
+                ty: "TIMESTAMP",
+            },
+            Column {
+                name: "data",
+                ty: "JSON",
+            },
         ],
         partition_expiration_days: Some(1),
     }
@@ -55,30 +64,35 @@ pub async fn run_check(
     // 1. Clarify API key (Secret Manager unless env override).
     let api_key = match (&cfg.api_key_override, &cfg.secret) {
         (Some(key), _) => {
-            step(&mut report, "secret", Ok("skipped (CLARIFY_API_KEY env override)".into()));
+            step(
+                &mut report,
+                "secret",
+                Ok("skipped (CLARIFY_API_KEY env override)".into()),
+            );
             Some(key.clone())
         }
-        (None, Some(secret)) => {
-            match fetch_secret(secretmanager_base, provider, secret).await {
-                Ok(key) => {
-                    step(&mut report, "secret", Ok(format!("read {}", secret.resource_name())));
-                    Some(key)
-                }
-                Err(e) => {
-                    step(&mut report, "secret", Err(e.to_string()));
-                    None
-                }
+        (None, Some(secret)) => match fetch_secret(secretmanager_base, provider, secret).await {
+            Ok(key) => {
+                step(
+                    &mut report,
+                    "secret",
+                    Ok(format!("read {}", secret.resource_name())),
+                );
+                Some(key)
             }
-        }
+            Err(e) => {
+                step(&mut report, "secret", Err(e.to_string()));
+                None
+            }
+        },
         (None, None) => unreachable!("Config::resolve guarantees one source"),
     };
 
     // 2. Clarify schema fetch.
     if let Some(key) = api_key {
         let probe = async {
-            let client =
-                ClarifyClient::new(clarify_base.to_string(), key, cfg.workspace.clone())
-                    .map_err(|e| e.to_string())?;
+            let client = ClarifyClient::new(clarify_base.to_string(), key, cfg.workspace.clone())
+                .map_err(|e| e.to_string())?;
             let schemas = client.fetch_schemas().await.map_err(|e| e.to_string())?;
             Ok::<_, String>(format!("{} object schemas discovered", schemas.len()))
         };
@@ -111,13 +125,24 @@ pub async fn run_check(
 
     // 4. Table create permission (scratch table, removed immediately).
     let probe = async {
-        sink.ensure_table(&check_table_spec()).await.map_err(|e| e.to_string())?;
-        sink.delete_table("_clarify_bq_check").await.map_err(|e| e.to_string())?;
+        sink.ensure_table(&check_table_spec())
+            .await
+            .map_err(|e| e.to_string())?;
+        sink.delete_table("_clarify_bq_check")
+            .await
+            .map_err(|e| e.to_string())?;
         Ok::<_, String>("create+delete _clarify_bq_check".to_string())
     };
     step(&mut report, "tables", probe.await);
 
-    (if failed { ExitCode::ConfigAuth } else { ExitCode::Complete }, report)
+    (
+        if failed {
+            ExitCode::ConfigAuth
+        } else {
+            ExitCode::Complete
+        },
+        report,
+    )
 }
 
 /// `clarify-bq mark-complete <run_id>` — repair a run whose data loaded but
@@ -132,13 +157,14 @@ pub async fn run_mark_complete(
         Err(e) => return (ExitCode::ConfigAuth, format!("run_id is not a UUID: {e}")),
     };
     let Some(ts) = parsed.get_timestamp() else {
-        return (ExitCode::ConfigAuth, "run_id is not a UUIDv7 (no timestamp)".into());
+        return (
+            ExitCode::ConfigAuth,
+            "run_id is not a UUIDv7 (no timestamp)".into(),
+        );
     };
     let (secs, nanos) = ts.to_unix();
-    let snapshot_at = humantime::format_rfc3339_seconds(
-        UNIX_EPOCH + Duration::new(secs, nanos),
-    )
-    .to_string();
+    let snapshot_at =
+        humantime::format_rfc3339_seconds(UNIX_EPOCH + Duration::new(secs, nanos)).to_string();
     let finished_at = crate::runs::now_rfc3339();
 
     let row = serde_json::json!({
@@ -157,7 +183,9 @@ pub async fn run_mark_complete(
         sink.ensure_table(&crate::tables::spec_for("runs", None))
             .await
             .map_err(|e| e.to_string())?;
-        sink.load_ndjson("runs", "runs_repair", &path, run_id).await.map_err(|e| e.to_string())?;
+        sink.load_ndjson("runs", "runs_repair", &path, run_id)
+            .await
+            .map_err(|e| e.to_string())?;
         let _ = spool.remove();
         Ok::<_, String>(())
     }

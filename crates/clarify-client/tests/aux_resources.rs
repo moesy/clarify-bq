@@ -59,7 +59,9 @@ async fn settings_is_returned_verbatim() {
 async fn record_activities_path_is_correct() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/workspaces/acme/objects/person/records/rec_1/activities"))
+        .and(path(
+            "/workspaces/acme/objects/person/records/rec_1/activities",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "data": [{"type":"activity","id":"act_1","attributes":{"kind":"comment"}}],
             "links": {"next": null}

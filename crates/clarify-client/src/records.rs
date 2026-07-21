@@ -51,9 +51,11 @@ impl ClarifyClient {
                  &sortOrder[column]=_created_at&sortOrder[dir]=ASC{include_q}"
             );
             let body = self.get_json(&q).await?;
-            let env: ResourcesEnvelope = serde_json::from_value(body).map_err(|e| {
-                ClientError::Shape { url: q.clone(), detail: e.to_string() }
-            })?;
+            let env: ResourcesEnvelope =
+                serde_json::from_value(body).map_err(|e| ClientError::Shape {
+                    url: q.clone(),
+                    detail: e.to_string(),
+                })?;
             expected = env.meta.total_records.or(expected);
             let n = env.data.len();
             for item in &env.data {

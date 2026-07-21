@@ -18,11 +18,26 @@ fn spec() -> TableSpec {
     TableSpec {
         name: "records_person".into(),
         columns: vec![
-            Column { name: "run_id", ty: "STRING" },
-            Column { name: "snapshot_at", ty: "TIMESTAMP" },
-            Column { name: "record_id", ty: "STRING" },
-            Column { name: "object", ty: "STRING" },
-            Column { name: "data", ty: "JSON" },
+            Column {
+                name: "run_id",
+                ty: "STRING",
+            },
+            Column {
+                name: "snapshot_at",
+                ty: "TIMESTAMP",
+            },
+            Column {
+                name: "record_id",
+                ty: "STRING",
+            },
+            Column {
+                name: "object",
+                ty: "STRING",
+            },
+            Column {
+                name: "data",
+                ty: "JSON",
+            },
         ],
         partition_expiration_days: Some(400),
     }
@@ -54,7 +69,9 @@ async fn creates_missing_dataset_with_location() {
 async fn creates_missing_table_with_partitioning_clustering_expiration() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/bigquery/v2/projects/proj/datasets/ds/tables/records_person"))
+        .and(path(
+            "/bigquery/v2/projects/proj/datasets/ds/tables/records_person",
+        ))
         .respond_with(ResponseTemplate::new(404))
         .expect(1)
         .mount(&server)
@@ -83,7 +100,9 @@ async fn creates_missing_table_with_partitioning_clustering_expiration() {
 async fn existing_table_gets_expiration_reasserted() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/bigquery/v2/projects/proj/datasets/ds/tables/records_person"))
+        .and(path(
+            "/bigquery/v2/projects/proj/datasets/ds/tables/records_person",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
         .expect(1)
         .mount(&server)

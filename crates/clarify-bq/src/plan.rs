@@ -56,7 +56,9 @@ impl ResourcePlan {
         let known: Vec<&str> = schemas.iter().map(|s| s.slug.as_str()).collect();
         for o in objects {
             if !known.contains(&o.as_str()) {
-                return Err(format!("unknown object {o:?}; discovered objects: {known:?}"));
+                return Err(format!(
+                    "unknown object {o:?}; discovered objects: {known:?}"
+                ));
             }
         }
         let mut skipped_cats = Vec::new();
@@ -89,7 +91,10 @@ impl ResourcePlan {
             .filter(|c| !skipped_cats.contains(c))
             .copied()
             .collect();
-        Ok(ResourcePlan { objects: objects_out, categories })
+        Ok(ResourcePlan {
+            objects: objects_out,
+            categories,
+        })
     }
 
     pub fn includes(&self, c: Category) -> bool {
@@ -99,8 +104,16 @@ impl ResourcePlan {
     pub fn describe(&self) -> String {
         format!(
             "objects: [{}]; categories: [{}]",
-            self.objects.iter().map(|o| o.slug.as_str()).collect::<Vec<_>>().join(", "),
-            self.categories.iter().map(|c| c.name()).collect::<Vec<_>>().join(", ")
+            self.objects
+                .iter()
+                .map(|o| o.slug.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            self.categories
+                .iter()
+                .map(|c| c.name())
+                .collect::<Vec<_>>()
+                .join(", ")
         )
     }
 }
@@ -129,11 +142,18 @@ mod tests {
 
     #[test]
     fn skip_category_and_per_object() {
-        let p = ResourcePlan::build(&schemas(), &[], &["activities".into(), "records:deal".into()])
-            .unwrap();
+        let p = ResourcePlan::build(
+            &schemas(),
+            &[],
+            &["activities".into(), "records:deal".into()],
+        )
+        .unwrap();
         assert!(!p.includes(Category::Activities));
         assert_eq!(
-            p.objects.iter().map(|o| o.slug.as_str()).collect::<Vec<_>>(),
+            p.objects
+                .iter()
+                .map(|o| o.slug.as_str())
+                .collect::<Vec<_>>(),
             vec!["person"]
         );
     }

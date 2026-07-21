@@ -84,8 +84,10 @@ mod tests {
         assert_eq!(removed, vec!["old_run".to_string()]);
 
         let mut w = spool.writer("records_person").unwrap();
-        w.write_row(&serde_json::json!({"record_id": "r1", "data": {}})).unwrap();
-        w.write_row(&serde_json::json!({"record_id": "r2", "data": {}})).unwrap();
+        w.write_row(&serde_json::json!({"record_id": "r1", "data": {}}))
+            .unwrap();
+        w.write_row(&serde_json::json!({"record_id": "r2", "data": {}}))
+            .unwrap();
         let (path, rows) = w.finish().unwrap();
         assert_eq!(rows, 2);
         let text = std::fs::read_to_string(path).unwrap();

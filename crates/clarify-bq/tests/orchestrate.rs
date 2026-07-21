@@ -54,7 +54,9 @@ async fn mock_clarify_happy(server: &MockServer) {
         .mount(server)
         .await;
     Mock::given(method("GET"))
-        .and(path_regex(r"^/workspaces/acme/objects/person/records/[^/]+/activities$"))
+        .and(path_regex(
+            r"^/workspaces/acme/objects/person/records/[^/]+/activities$",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "data": [{"type": "activity", "id": "act_1", "attributes": {"kind": "comment"}}],
             "links": {"next": null}
@@ -62,7 +64,9 @@ async fn mock_clarify_happy(server: &MockServer) {
         .mount(server)
         .await;
     Mock::given(method("GET"))
-        .and(path_regex(r"^/workspaces/acme/objects/person/records/[^/]+/attachments$"))
+        .and(path_regex(
+            r"^/workspaces/acme/objects/person/records/[^/]+/attachments$",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "data": [], "links": {"next": null}
         })))
@@ -101,12 +105,16 @@ async fn mock_bq(server: &MockServer) {
         .mount(server)
         .await;
     Mock::given(method("GET"))
-        .and(path_regex(r"^/bigquery/v2/projects/proj/datasets/ds/tables/[^/]+$"))
+        .and(path_regex(
+            r"^/bigquery/v2/projects/proj/datasets/ds/tables/[^/]+$",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
         .mount(server)
         .await;
     Mock::given(method("PATCH"))
-        .and(path_regex(r"^/bigquery/v2/projects/proj/datasets/ds/tables/[^/]+$"))
+        .and(path_regex(
+            r"^/bigquery/v2/projects/proj/datasets/ds/tables/[^/]+$",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
         .mount(server)
         .await;
@@ -135,8 +143,7 @@ async fn mock_bq(server: &MockServer) {
 }
 
 fn harness(clarify: &MockServer, bq: &MockServer) -> (ClarifyClient, BqSink) {
-    let client =
-        ClarifyClient::new(clarify.uri(), "sk_test".into(), "acme".into()).unwrap();
+    let client = ClarifyClient::new(clarify.uri(), "sk_test".into(), "acme".into()).unwrap();
     let sink = BqSink::new(
         Arc::new(StaticTokenProvider("tok".into())),
         bq.uri(),
@@ -166,15 +173,26 @@ async fn happy_path_backs_up_everything_and_marks_complete() {
     let spool = tempfile::tempdir().unwrap();
 
     let result = run_backup(&client, &sink, &args(false), spool.path()).await;
-    assert_eq!(result.exit, ExitCode::Complete, "summary: {}", result.summary);
+    assert_eq!(
+        result.exit,
+        ExitCode::Complete,
+        "summary: {}",
+        result.summary
+    );
     assert_eq!(result.summary["status"], "complete");
     assert_eq!(outcome(&result.summary, "records_person")["count"], 2);
     assert_eq!(outcome(&result.summary, "activities:person")["count"], 2);
     assert_eq!(outcome(&result.summary, "users")["count"], 1);
     assert_eq!(outcome(&result.summary, "settings")["count"], 1);
     // Spool removed on success.
-    assert_eq!(std::fs::read_dir(spool.path()).unwrap().flatten()
-        .filter(|e| e.file_type().unwrap().is_dir()).count(), 0);
+    assert_eq!(
+        std::fs::read_dir(spool.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_type().unwrap().is_dir())
+            .count(),
+        0
+    );
 }
 
 #[tokio::test]
@@ -210,7 +228,12 @@ async fn aux_failure_is_partial_exit() {
     let spool = tempfile::tempdir().unwrap();
 
     let result = run_backup(&client, &sink, &args(false), spool.path()).await;
-    assert_eq!(result.exit, ExitCode::Partial, "summary: {}", result.summary);
+    assert_eq!(
+        result.exit,
+        ExitCode::Partial,
+        "summary: {}",
+        result.summary
+    );
     assert_eq!(result.summary["status"], "partial");
     assert_eq!(outcome(&result.summary, "users")["status"], "failed");
     assert_eq!(outcome(&result.summary, "records_person")["status"], "ok");
@@ -236,6 +259,12 @@ async fn records_failure_is_failed_exit() {
     let result = run_backup(&client, &sink, &args(false), spool.path()).await;
     assert_eq!(result.exit, ExitCode::Failed, "summary: {}", result.summary);
     assert_eq!(result.summary["status"], "failed");
-    assert_eq!(outcome(&result.summary, "records_person")["status"], "failed");
-    assert_eq!(outcome(&result.summary, "activities:person")["status"], "skipped");
+    assert_eq!(
+        outcome(&result.summary, "records_person")["status"],
+        "failed"
+    );
+    assert_eq!(
+        outcome(&result.summary, "activities:person")["status"],
+        "skipped"
+    );
 }

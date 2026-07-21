@@ -32,7 +32,11 @@ fn extract(item: &serde_json::Value) -> ObjectSchema {
         relationships = rels.keys().cloned().collect();
     }
     relationships.sort();
-    ObjectSchema { slug, relationships, raw: item.clone() }
+    ObjectSchema {
+        slug,
+        relationships,
+        raw: item.clone(),
+    }
 }
 
 impl ClarifyClient {
@@ -43,9 +47,11 @@ impl ClarifyClient {
         let mut next: Option<String> = Some("/schemas".to_string());
         while let Some(url) = next {
             let body = self.get_json(&url).await?;
-            let env: LinkedEnvelope = serde_json::from_value(body).map_err(|e| {
-                ClientError::Shape { url: url.clone(), detail: e.to_string() }
-            })?;
+            let env: LinkedEnvelope =
+                serde_json::from_value(body).map_err(|e| ClientError::Shape {
+                    url: url.clone(),
+                    detail: e.to_string(),
+                })?;
             out.extend(env.data.iter().map(extract));
             next = env.links.next;
         }

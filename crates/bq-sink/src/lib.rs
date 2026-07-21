@@ -7,6 +7,6 @@ pub mod token;
 
 pub use admin::{BqSink, Column, TableSpec};
 pub use error::SinkError;
+pub use load::{MAX_CHUNK_BYTES, job_id, split_points};
 pub use secret::{SecretRef, fetch_secret};
 pub use token::{GcpAuthProvider, StaticTokenProvider, TokenProvider};
-pub use load::{MAX_CHUNK_BYTES, job_id, split_points};

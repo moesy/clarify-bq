@@ -13,7 +13,9 @@ pub struct ClarifyClient {
 
 impl ClarifyClient {
     pub fn new(base_url: String, api_key: String, workspace: String) -> Result<Self, ClientError> {
-        let http = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build()?;
+        let http = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .build()?;
         Ok(Self {
             http,
             base: base_url.trim_end_matches('/').to_string(),
@@ -27,7 +29,10 @@ impl ClarifyClient {
         if path_and_query.starts_with("http://") || path_and_query.starts_with("https://") {
             path_and_query.to_string()
         } else {
-            format!("{}/workspaces/{}{}", self.base, self.workspace, path_and_query)
+            format!(
+                "{}/workspaces/{}{}",
+                self.base, self.workspace, path_and_query
+            )
         }
     }
 
