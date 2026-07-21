@@ -101,29 +101,47 @@ pub async fn run_check(
         step(&mut report, "clarify", Err("skipped: no API key".into()));
     }
 
-    // 3. Dataset reachable + query permission.
+    // 3. Dataset reachable + query permission. A missing dataset is not a
+    // failure: the first backup run creates it.
     let sql = format!(
         "SELECT 1 FROM `{}.{}.INFORMATION_SCHEMA.TABLES` LIMIT 1",
         sink.project(),
         sink.dataset()
     );
+    let mut dataset_absent = false;
     step(
         &mut report,
         "dataset",
-        sink.query(&sql)
-            .await
-            .map(|_| format!("{}.{} reachable", sink.project(), sink.dataset()))
-            .map_err(|e| match e {
-                SinkError::Http { status: 404, .. } => format!(
-                    "dataset {}.{} not found (first backup run will create it)",
+        match sink.query(&sql).await {
+            Ok(_) => Ok(format!("{}.{} reachable", sink.project(), sink.dataset())),
+            Err(SinkError::Http { status: 404, .. }) => {
+                dataset_absent = true;
+                Ok(format!(
+                    "{}.{} does not exist yet; the first backup run will create it",
                     sink.project(),
                     sink.dataset()
-                ),
-                other => other.to_string(),
-            }),
+                ))
+            }
+            Err(other) => Err(other.to_string()),
+        },
     );
 
     // 4. Table create permission (scratch table, removed immediately).
+    if dataset_absent {
+        step(
+            &mut report,
+            "tables",
+            Ok("skipped: dataset does not exist yet".into()),
+        );
+        return (
+            if failed {
+                ExitCode::ConfigAuth
+            } else {
+                ExitCode::Complete
+            },
+            report,
+        );
+    }
     let probe = async {
         sink.ensure_table(&check_table_spec())
             .await

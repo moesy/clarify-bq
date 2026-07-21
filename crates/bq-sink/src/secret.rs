@@ -70,7 +70,12 @@ pub async fn fetch_secret(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64)
         .map_err(|e| SinkError::Config(format!("secret payload not base64: {e}")))?;
-    String::from_utf8(bytes).map_err(|e| SinkError::Config(format!("secret not utf8: {e}")))
+    let value =
+        String::from_utf8(bytes).map_err(|e| SinkError::Config(format!("secret not utf8: {e}")))?;
+    // Secrets created via `echo key | gcloud secrets ...` carry a trailing
+    // newline that silently breaks the Authorization header. API keys never
+    // legitimately start or end with whitespace.
+    Ok(value.trim().to_string())
 }
 
 #[cfg(test)]

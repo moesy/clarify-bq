@@ -6,7 +6,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 #[tokio::test]
 async fn accesses_secret_and_decodes_payload() {
     let server = MockServer::start().await;
-    let b64 = base64::engine::general_purpose::STANDARD.encode("sk_synthetic_value");
+    // Trailing newline (echo-into-gcloud artifact) must be stripped.
+    let b64 = base64::engine::general_purpose::STANDARD.encode("sk_synthetic_value\n");
     Mock::given(method("GET"))
         .and(path(
             "/v1/projects/demo-proj/secrets/clarify-key/versions/latest:access",

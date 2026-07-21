@@ -96,6 +96,35 @@ async fn check_reports_probes_and_fails_on_denied_dataset() {
 }
 
 #[tokio::test]
+async fn check_treats_missing_dataset_as_informational() {
+    let clarify = MockServer::start().await;
+    let gcp = MockServer::start().await;
+    mock_schemas(&clarify).await;
+    Mock::given(method("POST"))
+        .and(path("/bigquery/v2/projects/proj/queries"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+            "error": {"message": "Not found: Dataset proj:ds"}
+        })))
+        .mount(&gcp)
+        .await;
+
+    let conn = ConnArgs {
+        workspace: "acme".into(),
+        project: "proj".into(),
+        secret: None,
+        dataset: "ds".into(),
+        location: "US".into(),
+    };
+    let cfg = Config::resolve(&conn, Some("sk_env".into())).unwrap();
+    let s = sink(&gcp);
+    let provider = StaticTokenProvider("tok".into());
+    let (exit, report) = run_check(&cfg, &provider, &gcp.uri(), &clarify.uri(), &s).await;
+    assert_eq!(exit, ExitCode::Complete, "report:\n{report}");
+    assert!(report.contains("ok    dataset: proj.ds does not exist yet"));
+    assert!(report.contains("ok    tables: skipped"));
+}
+
+#[tokio::test]
 async fn mark_complete_loads_runs_row_with_derived_timestamp() {
     let gcp = MockServer::start().await;
     Mock::given(method("GET"))
