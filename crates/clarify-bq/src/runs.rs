@@ -1,5 +1,9 @@
 use std::collections::HashMap;
 
+pub fn now_rfc3339() -> String {
+    humantime::format_rfc3339_seconds(std::time::SystemTime::now()).to_string()
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ResourceOutcome {
     pub resource: String,

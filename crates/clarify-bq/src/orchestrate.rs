@@ -11,13 +11,10 @@ use clarify_client::{ClarifyClient, ClientError, ObjectSchema};
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 const FETCH_CONCURRENCY: usize = 4;
 
-fn now_rfc3339() -> String {
-    humantime::format_rfc3339_seconds(SystemTime::now()).to_string()
-}
+use crate::runs::now_rfc3339;
 
 fn json_id(item: &serde_json::Value) -> String {
     item["id"].as_str().unwrap_or_default().to_string()

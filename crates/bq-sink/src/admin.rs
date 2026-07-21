@@ -102,6 +102,19 @@ impl BqSink {
         Self::expect_ok(status, &get, &body)
     }
 
+    /// Used by `check`'s permission probe to clean up its scratch table.
+    pub async fn delete_table(&self, name: &str) -> Result<(), SinkError> {
+        let url = format!(
+            "{}/bigquery/v2/projects/{}/datasets/{}/tables/{}",
+            self.base, self.project, self.dataset, name
+        );
+        let (status, body) = self.api(reqwest::Method::DELETE, url.clone(), None).await?;
+        if status == 404 {
+            return Ok(());
+        }
+        Self::expect_ok(status, &url, &body)
+    }
+
     fn partitioning_json(spec: &TableSpec) -> serde_json::Value {
         let mut tp = serde_json::json!({"type": "DAY", "field": "snapshot_at"});
         if let Some(days) = spec.partition_expiration_days {
