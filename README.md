@@ -17,27 +17,35 @@ cargo install clarify-bq
 
 ## Setup
 
-1. Store your Clarify API key in Google Secret Manager (or set `CLARIFY_API_KEY`).
+1. Store your Clarify API key in Google Secret Manager — or skip Secret
+   Manager entirely and set `CLARIFY_API_KEY`.
 2. Have [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials)
    with `secretmanager.secretAccessor`, `bigquery.dataEditor`, and `bigquery.jobUser`.
-3. Verify:
+3. Point the CLI at your workspace — every flag is also an env var, so set the
+   connection up once:
 
 ```sh
-clarify-bq check \
-  --workspace my-workspace \
-  --project my-gcp-project \
-  --secret projects/my-gcp-project/secrets/clarify-api-key
+export CLARIFY_WORKSPACE=my-workspace
+export BQ_PROJECT=my-gcp-project
+export CLARIFY_SECRET=projects/my-gcp-project/secrets/clarify-api-key
+# ...or, without Secret Manager:
+# export CLARIFY_API_KEY=sk-your-key
+```
+
+4. Verify:
+
+```sh
+clarify-bq check
 ```
 
 ## Back up
 
 ```sh
-clarify-bq backup --workspace my-workspace --project my-gcp-project \
-  --secret projects/my-gcp-project/secrets/clarify-api-key
+clarify-bq backup
 ```
 
-Flags come from env vars too (`CLARIFY_WORKSPACE`, `BQ_PROJECT`, `CLARIFY_SECRET`,
-`BQ_DATASET`, `BQ_LOCATION`). Useful options:
+Prefer flags over env? `--workspace`, `--project`, `--secret`, `--dataset`,
+and `--location` work everywhere. Useful options:
 
 | Flag | Effect |
 |------|--------|
