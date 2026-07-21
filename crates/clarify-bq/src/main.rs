@@ -1,11 +1,5 @@
-mod cli;
-mod config;
-mod lock;
-mod plan;
-mod spool;
-mod tables;
-
 use clap::Parser;
+use clarify_bq::cli;
 
 fn main() {
     let cli = cli::Cli::parse();

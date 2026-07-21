@@ -42,6 +42,14 @@ impl BqSink {
         }
     }
 
+    pub fn project(&self) -> &str {
+        &self.project
+    }
+
+    pub fn dataset(&self) -> &str {
+        &self.dataset
+    }
+
     pub(crate) async fn bearer(&self) -> Result<String, SinkError> {
         self.provider.token().await
     }
