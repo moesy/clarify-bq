@@ -1,4 +1,5 @@
 //! Unofficial async client for the Clarify CRM REST API.
+pub mod aux;
 pub mod envelope;
 pub mod error;
 pub mod http;

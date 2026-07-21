@@ -26,10 +26,10 @@ fn extract(item: &serde_json::Value) -> ObjectSchema {
                 .collect()
         })
         .unwrap_or_default();
-    if relationships.is_empty() {
-        if let Some(rels) = item["relationships"].as_object() {
-            relationships = rels.keys().cloned().collect();
-        }
+    if relationships.is_empty()
+        && let Some(rels) = item["relationships"].as_object()
+    {
+        relationships = rels.keys().cloned().collect();
     }
     relationships.sort();
     ObjectSchema { slug, relationships, raw: item.clone() }
