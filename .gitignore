@@ -1,0 +1,8 @@
+# Local design docs and specs stay out of the repo
+docs/superpowers/
+
+# Rust
+target/
+
+# Local env
+.env
