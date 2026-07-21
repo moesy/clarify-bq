@@ -211,6 +211,7 @@ pub async fn run_views(
         &views_dataset,
         &objects,
         &crate::views::AUX_TABLES,
+        &crate::views::schema_defs(&schemas),
     )
     .await;
     let mut out = format!("{n} view(s) refreshed in {views_dataset}\n");

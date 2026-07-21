@@ -659,8 +659,14 @@ pub async fn run_backup(
             .filter(|t| !t.starts_with("records_"))
             .chain(std::iter::once("runs"))
             .collect();
-        let (n, view_errors) =
-            crate::views::create_latest_views(sink, &views_dataset, &view_objects, &aux).await;
+        let (n, view_errors) = crate::views::create_latest_views(
+            sink,
+            &views_dataset,
+            &view_objects,
+            &aux,
+            &crate::views::schema_defs(&schemas),
+        )
+        .await;
         for e in &view_errors {
             tracing::error!(error = %e, "latest view refresh failed (data is safe; \
                 re-run with: clarify-bq views)");
