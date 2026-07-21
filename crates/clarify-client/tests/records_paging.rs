@@ -55,9 +55,18 @@ async fn pages_by_returned_count_and_terminates_on_short_page() {
 #[tokio::test]
 async fn count_drift_reports_dirty() {
     let server = MockServer::start().await;
+    // total_records claims 5, but the data runs dry after 1: the next offset
+    // returns an empty page (records deleted mid-run, or server truncation).
     Mock::given(method("GET"))
         .and(path("/workspaces/acme/objects/person/resources"))
+        .and(query_param("page[offset]", "0"))
         .respond_with(ResponseTemplate::new(200).set_body_json(page(&["r1"], 5)))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/workspaces/acme/objects/person/resources"))
+        .and(query_param("page[offset]", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page(&[], 5)))
         .mount(&server)
         .await;
     let client = ClarifyClient::new(server.uri(), "sk_test".into(), "acme".into()).unwrap();

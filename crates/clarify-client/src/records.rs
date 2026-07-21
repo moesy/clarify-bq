@@ -66,7 +66,10 @@ impl ClarifyClient {
             // Advance by the returned count, never by the requested limit: the
             // server may clamp the page size (spec: silent half-page skips otherwise).
             offset += n as u64;
-            if n < PAGE_LIMIT {
+            // A short page only ends the scan once we've seen everything the
+            // server claims exists — a clamped page size also produces short
+            // pages, and stopping there would silently drop the tail.
+            if n == 0 || (n < PAGE_LIMIT && expected.is_none_or(|e| fetched >= e)) {
                 break;
             }
         }
