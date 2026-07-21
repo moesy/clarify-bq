@@ -1,13 +1,13 @@
 [package]
-name = "clarify-client"
-version = "0.1.0"
+name = "clarify-bq-sink"
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories = ["api-bindings"]
 readme = "../../README.md"
-description = "Async client for the Clarify CRM REST API (unofficial)"
+description = "Internal support crate for the clarify-bq CLI (BigQuery load jobs); no stability guarantees"
 
 [dependencies]
 thiserror.workspace = true
@@ -16,6 +16,10 @@ serde_json.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
 tracing.workspace = true
+gcp_auth.workspace = true
+async-trait.workspace = true
+base64.workspace = true
 
 [dev-dependencies]
 wiremock.workspace = true
+tempfile.workspace = true

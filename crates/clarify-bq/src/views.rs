@@ -1,7 +1,7 @@
 use crate::plan::{Category, ResourcePlan};
 use crate::tables::{records_table_names, sanitize};
-use bq_sink::BqSink;
-use clarify_client::ObjectSchema;
+use clarify_bq_sink::BqSink;
+use clarify_bq_client::ObjectSchema;
 use futures::StreamExt;
 use std::collections::HashMap;
 
@@ -265,7 +265,7 @@ pub async fn refresh(
     }));
 
     // Views are independent: run the DDL concurrently, tolerate absent tables.
-    let results: Vec<(String, Result<(), bq_sink::SinkError>)> = futures::stream::iter(
+    let results: Vec<(String, Result<(), clarify_bq_sink::SinkError>)> = futures::stream::iter(
         ddls.into_iter()
             .map(|(label, sql)| async move { (label, sink.query(&sql).await.map(|_| ())) }),
     )
@@ -280,7 +280,7 @@ pub async fn refresh(
             Ok(()) => n += 1,
             // Backing table absent (skipped object, never-run category): not
             // an error, there is simply nothing to view yet.
-            Err(bq_sink::SinkError::Http { status: 404, .. }) => {
+            Err(clarify_bq_sink::SinkError::Http { status: 404, .. }) => {
                 tracing::info!(view = %label, "skipping view: backing table does not exist");
             }
             Err(e) => errors.push(format!("view for {label}: {e}")),

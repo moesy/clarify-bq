@@ -1,8 +1,8 @@
-use bq_sink::{BqSink, StaticTokenProvider};
+use clarify_bq_sink::{BqSink, StaticTokenProvider};
 use clarify_bq::cli::{ConnArgs, ExitCode};
 use clarify_bq::commands::{run_check, run_mark_complete, run_objects};
 use clarify_bq::config::Config;
-use clarify_client::ClarifyClient;
+use clarify_bq_client::ClarifyClient;
 use std::sync::Arc;
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};

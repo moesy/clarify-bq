@@ -122,23 +122,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 
 [[package]]
-name = "bq-sink"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64",
- "gcp_auth",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "wiremock",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -239,12 +222,12 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "clarify-bq"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
- "bq-sink",
  "clap",
- "clarify-client",
+ "clarify-bq-client",
+ "clarify-bq-sink",
  "directories",
  "fs2",
  "futures",
@@ -262,12 +245,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "clarify-client"
-version = "0.1.0"
+name = "clarify-bq-client"
+version = "0.1.1"
 dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "wiremock",
+]
+
+[[package]]
+name = "clarify-bq-sink"
+version = "0.1.1"
+dependencies = [
+ "async-trait",
+ "base64",
+ "gcp_auth",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",

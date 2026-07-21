@@ -1,8 +1,8 @@
 use crate::cli::ExitCode;
 use crate::config::{ApiKeySource, Config};
 use crate::spool::RunSpool;
-use bq_sink::{BqSink, SinkError, TableSpec, TokenProvider};
-use clarify_client::{ClarifyClient, ClientError};
+use clarify_bq_sink::{BqSink, SinkError, TableSpec, TokenProvider};
+use clarify_bq_client::{ClarifyClient, ClientError};
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 

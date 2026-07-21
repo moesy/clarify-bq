@@ -1,4 +1,4 @@
-use clarify_client::ObjectSchema;
+use clarify_bq_client::ObjectSchema;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Category {

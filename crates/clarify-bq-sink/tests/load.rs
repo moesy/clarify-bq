@@ -1,5 +1,5 @@
-use bq_sink::StaticTokenProvider;
-use bq_sink::admin::BqSink;
+use clarify_bq_sink::StaticTokenProvider;
+use clarify_bq_sink::admin::BqSink;
 use std::io::Write;
 use std::sync::Arc;
 use wiremock::matchers::{method, path, query_param};

@@ -1,4 +1,4 @@
-use clarify_client::{ClarifyClient, ClientError};
+use clarify_bq_client::{ClarifyClient, ClientError};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

@@ -1,5 +1,5 @@
 use crate::cli::ConnArgs;
-use bq_sink::{SecretRef, TokenProvider, fetch_secret};
+use clarify_bq_sink::{SecretRef, TokenProvider, fetch_secret};
 
 /// Where the Clarify API key comes from — resolution guarantees exactly one.
 #[derive(Debug)]

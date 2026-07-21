@@ -1,6 +1,6 @@
 use crate::spool::RunSpool;
 use crate::tables::spec_for;
-use bq_sink::BqSink;
+use clarify_bq_sink::BqSink;
 use std::collections::HashMap;
 
 pub fn now_rfc3339() -> String {

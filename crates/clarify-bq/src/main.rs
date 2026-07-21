@@ -32,19 +32,19 @@ fn exit_config(msg: &str) -> ! {
 }
 
 struct Gcp {
-    provider: Arc<dyn bq_sink::TokenProvider>,
-    sink: bq_sink::BqSink,
+    provider: Arc<dyn clarify_bq_sink::TokenProvider>,
+    sink: clarify_bq_sink::BqSink,
 }
 
 async fn gcp(cfg: &Config) -> Gcp {
-    let provider: Arc<dyn bq_sink::TokenProvider> = match bq_sink::GcpAuthProvider::new().await {
+    let provider: Arc<dyn clarify_bq_sink::TokenProvider> = match clarify_bq_sink::GcpAuthProvider::new().await {
         Ok(p) => Arc::new(p),
         Err(e) => exit_config(&format!(
             "{e}. Application Default Credentials are required \
              (gcloud auth application-default login, or GOOGLE_APPLICATION_CREDENTIALS)"
         )),
     };
-    let sink = bq_sink::BqSink::new(
+    let sink = clarify_bq_sink::BqSink::new(
         provider.clone(),
         BIGQUERY_BASE.into(),
         cfg.project.clone(),
@@ -54,14 +54,14 @@ async fn gcp(cfg: &Config) -> Gcp {
     Gcp { provider, sink }
 }
 
-fn make_client(cfg: &Config, api_key: String) -> clarify_client::ClarifyClient {
-    match clarify_client::ClarifyClient::new(CLARIFY_BASE.into(), api_key, cfg.workspace.clone()) {
+fn make_client(cfg: &Config, api_key: String) -> clarify_bq_client::ClarifyClient {
+    match clarify_bq_client::ClarifyClient::new(CLARIFY_BASE.into(), api_key, cfg.workspace.clone()) {
         Ok(c) => c,
         Err(e) => exit_config(&e.to_string()),
     }
 }
 
-async fn clarify_client(cfg: &Config, gcp: &Gcp) -> clarify_client::ClarifyClient {
+async fn clarify_bq_client(cfg: &Config, gcp: &Gcp) -> clarify_bq_client::ClarifyClient {
     match cfg.api_key(gcp.provider.as_ref(), SECRETMANAGER_BASE).await {
         Ok(key) => make_client(cfg, key),
         Err(e) => exit_config(&e),
@@ -84,7 +84,7 @@ async fn main() {
         Command::Backup(args) => {
             let cfg = resolve(&args.conn);
             let g = gcp(&cfg).await;
-            let client = clarify_client(&cfg, &g).await;
+            let client = clarify_bq_client(&cfg, &g).await;
             let spool_root = args
                 .spool_dir
                 .clone()
@@ -135,7 +135,7 @@ async fn main() {
                 ApiKeySource::Env(key) => make_client(&cfg, key.clone()),
                 ApiKeySource::Secret(_) => {
                     let g = gcp(&cfg).await;
-                    clarify_client(&cfg, &g).await
+                    clarify_bq_client(&cfg, &g).await
                 }
             };
             let (exit, out) = commands::run_objects(&client).await;
@@ -170,7 +170,7 @@ async fn main() {
         } => {
             let cfg = resolve(conn);
             let g = gcp(&cfg).await;
-            let client = clarify_client(&cfg, &g).await;
+            let client = clarify_bq_client(&cfg, &g).await;
             let (exit, out) = commands::run_views(&client, &g.sink, views_dataset.clone()).await;
             print!("{out}");
             exit

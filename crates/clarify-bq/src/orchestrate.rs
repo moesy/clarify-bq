@@ -7,8 +7,8 @@ use crate::runs::{
 use crate::spool::{RunSpool, SpoolWriter, sweep_orphans};
 use crate::tables::{records_table_names, sanitize, spec_for};
 use crate::{lock::RunLock, views};
-use bq_sink::BqSink;
-use clarify_client::{ClarifyClient, ClientError, ObjectSchema};
+use clarify_bq_sink::BqSink;
+use clarify_bq_client::{ClarifyClient, ClientError, ObjectSchema};
 use futures::StreamExt;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};

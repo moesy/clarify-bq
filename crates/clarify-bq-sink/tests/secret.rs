@@ -1,5 +1,5 @@
 use base64::Engine;
-use bq_sink::{SecretRef, StaticTokenProvider, fetch_secret};
+use clarify_bq_sink::{SecretRef, StaticTokenProvider, fetch_secret};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

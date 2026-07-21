@@ -1,4 +1,4 @@
-use clarify_client::ClarifyClient;
+use clarify_bq_client::ClarifyClient;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

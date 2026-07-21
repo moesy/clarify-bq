@@ -1,5 +1,5 @@
-use bq_sink::{Column, TableSpec};
-use clarify_client::ObjectSchema;
+use clarify_bq_sink::{Column, TableSpec};
+use clarify_bq_client::ObjectSchema;
 use std::collections::HashMap;
 
 const fn col(name: &'static str, ty: &'static str) -> Column {

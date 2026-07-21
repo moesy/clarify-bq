@@ -1,5 +1,5 @@
-use bq_sink::StaticTokenProvider;
-use bq_sink::admin::{BqSink, Column, TableSpec};
+use clarify_bq_sink::StaticTokenProvider;
+use clarify_bq_sink::admin::{BqSink, Column, TableSpec};
 use std::sync::Arc;
 use wiremock::matchers::{body_partial_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};

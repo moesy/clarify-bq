@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/clarify-client", "crates/bq-sink", "crates/clarify-bq"]
+members = ["crates/clarify-bq-client", "crates/clarify-bq-sink", "crates/clarify-bq"]
 
 [workspace.package]
 edition = "2024"
