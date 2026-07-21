@@ -4,11 +4,14 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories = ["command-line-utilities"]
+readme = "../../README.md"
 description = "Append-only backup of a Clarify CRM workspace into BigQuery (unofficial)"
 
 [dependencies]
-clarify-client = { path = "../clarify-client" }
-bq-sink = { path = "../bq-sink" }
+clarify-client = { path = "../clarify-client", version = "0.1.0" }
+bq-sink = { path = "../bq-sink", version = "0.1.0" }
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true

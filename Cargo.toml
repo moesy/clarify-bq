@@ -6,6 +6,7 @@ members = ["crates/clarify-client", "crates/bq-sink", "crates/clarify-bq"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/moesy/clarify-bq"
+keywords = ["clarify", "bigquery", "backup", "crm"]
 
 [workspace.dependencies]
 anyhow = "1"
