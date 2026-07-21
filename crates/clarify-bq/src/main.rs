@@ -1,6 +1,8 @@
 mod cli;
 mod config;
+mod lock;
 mod plan;
+mod spool;
 mod tables;
 
 use clap::Parser;
