@@ -615,6 +615,42 @@ pub async fn run_backup(
         tracing::warn!(error = %e, "spool cleanup failed (will be swept next run)");
     }
 
+    // ---- Latest views (best-effort: data freshness is dynamic, this only
+    // keeps view columns in sync with the CRM schema) ----
+    let mut views_summary = serde_json::Value::Null;
+    if !args.no_views && status != "failed" {
+        let views_dataset = args
+            .views_dataset
+            .clone()
+            .unwrap_or_else(|| format!("{}_latest", sink_dataset(sink)));
+        let view_objects: Vec<(String, String, serde_json::Value)> = plan
+            .objects
+            .iter()
+            .filter_map(|s| {
+                let table = table_names.iter().find(|(sl, _)| sl == &s.slug)?.1.clone();
+                ensured
+                    .contains(&table)
+                    .then(|| (s.slug.clone(), table, s.raw.clone()))
+            })
+            .collect();
+        let aux: Vec<&str> = ensured
+            .iter()
+            .map(String::as_str)
+            .filter(|t| !t.starts_with("records_"))
+            .chain(std::iter::once("runs"))
+            .collect();
+        let (n, view_errors) =
+            crate::views::create_latest_views(sink, &views_dataset, &view_objects, &aux).await;
+        for e in &view_errors {
+            tracing::error!(error = %e, "latest view refresh failed (data is safe; \
+                re-run with: clarify-bq views)");
+        }
+        tracing::info!(dataset = %views_dataset, views = n, "latest views refreshed");
+        views_summary = serde_json::json!({
+            "dataset": views_dataset, "created": n, "errors": view_errors,
+        });
+    }
+
     let exit = match status {
         "failed" => ExitCode::Failed,
         "partial" => ExitCode::Partial,
@@ -629,6 +665,7 @@ pub async fn run_backup(
             "finished_at": finished_at,
             "status": status,
             "shrink_violations": violations,
+            "views": views_summary,
             "resources": outcomes,
         }),
     }

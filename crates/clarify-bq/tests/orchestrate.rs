@@ -24,6 +24,8 @@ fn args(dry_run: bool) -> BackupArgs {
         shrink_threshold: 5.0,
         no_shrink_check: false,
         partition_expiration_days: 400,
+        views_dataset: None,
+        no_views: false,
         output: Format::Text,
     }
 }
@@ -106,7 +108,7 @@ async fn mock_clarify_happy(server: &MockServer) {
 
 async fn mock_bq(server: &MockServer) {
     Mock::given(method("GET"))
-        .and(path("/bigquery/v2/projects/proj/datasets/ds"))
+        .and(path_regex(r"^/bigquery/v2/projects/proj/datasets/[^/]+$"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
         .mount(server)
         .await;
@@ -190,6 +192,30 @@ async fn happy_path_backs_up_everything_and_marks_complete() {
     assert_eq!(outcome(&result.summary, "activities:person")["count"], 2);
     assert_eq!(outcome(&result.summary, "users")["count"], 1);
     assert_eq!(outcome(&result.summary, "settings")["count"], 1);
+    // Latest views refreshed into <dataset>_latest (person + aux + runs).
+    assert_eq!(result.summary["views"]["dataset"], "ds_latest");
+    assert!(result.summary["views"]["created"].as_u64().unwrap() >= 2);
+    assert!(
+        result.summary["views"]["errors"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let view_ddls: Vec<String> = bq
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path().ends_with("/queries"))
+        .map(|r| String::from_utf8_lossy(&r.body).to_string())
+        .filter(|b| b.contains("CREATE OR REPLACE VIEW"))
+        .collect();
+    assert!(
+        view_ddls
+            .iter()
+            .any(|b| b.contains("`proj.ds_latest.person`")),
+        "person view DDL issued"
+    );
     // Spool removed on success.
     assert_eq!(
         std::fs::read_dir(spool.path())

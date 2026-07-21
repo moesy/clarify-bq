@@ -67,6 +67,12 @@ pub struct BackupArgs {
     /// Partition expiration in days; 0 = keep forever
     #[arg(long, default_value_t = 400)]
     pub partition_expiration_days: u32,
+    /// Dataset for latest-snapshot flat views (default: <dataset>_latest)
+    #[arg(long)]
+    pub views_dataset: Option<String>,
+    /// Skip refreshing the latest-snapshot views after the backup
+    #[arg(long)]
+    pub no_views: bool,
     #[arg(long, value_enum, default_value = "text")]
     pub output: Format,
 }
@@ -90,6 +96,14 @@ pub enum Command {
         run_id: String,
         #[command(flatten)]
         conn: ConnArgs,
+    },
+    /// Create/refresh the latest-snapshot flat views
+    Views {
+        #[command(flatten)]
+        conn: ConnArgs,
+        /// Dataset for the views (default: <dataset>_latest)
+        #[arg(long)]
+        views_dataset: Option<String>,
     },
 }
 

@@ -176,6 +176,17 @@ async fn main() {
             println!("{msg}");
             exit
         }
+        Command::Views {
+            conn,
+            views_dataset,
+        } => {
+            let cfg = resolve(conn);
+            let g = gcp(&cfg).await;
+            let client = clarify_client(&cfg, &g.provider).await;
+            let (exit, out) = commands::run_views(&client, &g.sink, views_dataset.clone()).await;
+            print!("{out}");
+            exit
+        }
     };
     std::process::exit(exit.code());
 }

@@ -175,6 +175,58 @@ pub async fn run_check(
     )
 }
 
+/// `clarify-bq views` — create/refresh the latest-snapshot flat views from the
+/// live Clarify schemas.
+pub async fn run_views(
+    client: &ClarifyClient,
+    sink: &BqSink,
+    views_dataset: Option<String>,
+) -> (ExitCode, String) {
+    let schemas = match client.fetch_schemas().await {
+        Ok(s) => s,
+        Err(e @ clarify_client::ClientError::Auth { .. }) => {
+            return (ExitCode::ConfigAuth, e.to_string());
+        }
+        Err(e) => return (ExitCode::Failed, e.to_string()),
+    };
+    let plan = match crate::plan::ResourcePlan::build(&schemas, &[], &[]) {
+        Ok(p) => p,
+        Err(e) => return (ExitCode::ConfigAuth, e),
+    };
+    let table_names = match crate::tables::records_table_names(&plan.objects) {
+        Ok(t) => t,
+        Err(e) => return (ExitCode::ConfigAuth, e),
+    };
+    let objects: Vec<(String, String, serde_json::Value)> = plan
+        .objects
+        .iter()
+        .filter_map(|s| {
+            let table = table_names.iter().find(|(sl, _)| sl == &s.slug)?.1.clone();
+            Some((s.slug.clone(), table, s.raw.clone()))
+        })
+        .collect();
+    let views_dataset = views_dataset.unwrap_or_else(|| format!("{}_latest", sink.dataset()));
+    let (n, errors) = crate::views::create_latest_views(
+        sink,
+        &views_dataset,
+        &objects,
+        &crate::views::AUX_TABLES,
+    )
+    .await;
+    let mut out = format!("{n} view(s) refreshed in {views_dataset}\n");
+    for e in &errors {
+        out.push_str(&format!("FAIL  {e}\n"));
+    }
+    (
+        if errors.is_empty() {
+            ExitCode::Complete
+        } else {
+            ExitCode::Partial
+        },
+        out,
+    )
+}
+
 /// `clarify-bq mark-complete <run_id>` — repair a run whose data loaded but
 /// whose runs row failed to write. snapshot_at is derived from the UUIDv7.
 pub async fn run_mark_complete(

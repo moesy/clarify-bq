@@ -84,14 +84,19 @@ impl BqSink {
     }
 
     pub async fn ensure_dataset(&self) -> Result<(), SinkError> {
+        let dataset = self.dataset.clone();
+        self.ensure_dataset_named(&dataset).await
+    }
+
+    pub async fn ensure_dataset_named(&self, dataset: &str) -> Result<(), SinkError> {
         let get = format!(
             "{}/bigquery/v2/projects/{}/datasets/{}",
-            self.base, self.project, self.dataset
+            self.base, self.project, dataset
         );
         let (status, body) = self.api(reqwest::Method::GET, get.clone(), None).await?;
         if status == 404 {
             tracing::warn!(
-                dataset = %self.dataset,
+                dataset = %dataset,
                 location = %self.location,
                 "creating dataset — location is immutable after creation"
             );
@@ -100,7 +105,7 @@ impl BqSink {
                 self.base, self.project
             );
             let body = serde_json::json!({
-                "datasetReference": {"projectId": self.project, "datasetId": self.dataset},
+                "datasetReference": {"projectId": self.project, "datasetId": dataset},
                 "location": self.location
             });
             let (s, b) = self

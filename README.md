@@ -77,6 +77,24 @@ overlapping runs (exit 5 = benign skip). Exit codes:
 warehouse-side dead-man's alert: no `runs` row with `status='complete'` in the
 last 25 hours.
 
+## Reading the data: latest views
+
+The easiest way in: after each backup the CLI maintains a second dataset
+(default `<dataset>_latest`) with **one flat view per object** plus
+pass-through views for the aux tables:
+
+```sql
+SELECT * FROM clarify_crm_latest.person;      -- current CRM state, flat columns
+```
+
+Views resolve the newest complete run **at query time** — no refresh needed
+for freshness. Columns are generated from each object's schema (scalars typed
+via `JSON_VALUE`/`SAFE_CAST`, many-to-one relationships as id columns, nested
+values kept as JSON, full payload still in `data`), and are re-generated after
+each backup so new CRM fields appear automatically. `--views-dataset` renames
+the dataset, `--no-views` disables the refresh, and `clarify-bq views`
+rebuilds on demand.
+
 ## Reading the data
 
 Each resource lands in its own day-partitioned, `run_id`-clustered table with

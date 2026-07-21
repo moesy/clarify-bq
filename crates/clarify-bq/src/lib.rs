@@ -8,3 +8,4 @@ pub mod plan;
 pub mod runs;
 pub mod spool;
 pub mod tables;
+pub mod views;
