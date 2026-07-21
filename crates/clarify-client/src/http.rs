@@ -13,7 +13,9 @@ pub struct ClarifyClient {
 
 impl ClarifyClient {
     pub fn new(base_url: String, api_key: String, workspace: String) -> Result<Self, ClientError> {
+        // Clarify's edge rejects requests without a User-Agent (HTTP 403).
         let http = reqwest::Client::builder()
+            .user_agent(concat!("clarify-bq/", env!("CARGO_PKG_VERSION")))
             .timeout(REQUEST_TIMEOUT)
             .build()?;
         Ok(Self {

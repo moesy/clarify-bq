@@ -12,6 +12,7 @@ async fn sends_api_key_auth_header() {
     Mock::given(method("GET"))
         .and(path("/workspaces/acme/users"))
         .and(header("Authorization", "api-key sk_test_synthetic"))
+        .and(wiremock::matchers::header_exists("User-Agent"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": []})))
         .expect(1)
         .mount(&server)
