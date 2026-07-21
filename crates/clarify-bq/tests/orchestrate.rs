@@ -356,6 +356,54 @@ async fn single_bad_record_feed_is_skipped_and_marked_dirty() {
 }
 
 #[tokio::test]
+async fn feed_circuit_breaker_stops_after_three_consecutive_failures() {
+    let clarify = MockServer::start().await;
+    let bq = MockServer::start().await;
+    mock_clarify_happy(&clarify).await;
+    mock_bq(&bq).await;
+    // Five records; every activity feed 404s (persistently broken endpoint).
+    clarify.reset().await;
+    mock_clarify_happy(&clarify).await;
+    Mock::given(method("GET"))
+        .and(path("/workspaces/acme/objects/person/resources"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": (1..=5).map(|i| serde_json::json!({
+                "type": "person", "id": format!("rec_{i}"),
+                "attributes": {"name": format!("Synthetic {i}")},
+                "relationships": {}
+            })).collect::<Vec<_>>(),
+            "included": [], "meta": {"total_records": 5}
+        })))
+        .with_priority(1)
+        .mount(&clarify)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex(
+            r"^/workspaces/acme/objects/person/records/[^/]+/activities$",
+        ))
+        .respond_with(ResponseTemplate::new(404))
+        .with_priority(1)
+        .expect(3) // breaker must stop further attempts
+        .mount(&clarify)
+        .await;
+    let (client, sink) = harness(&clarify, &bq);
+    let spool = tempfile::tempdir().unwrap();
+
+    let result = run_backup(&client, &sink, &args(false), spool.path()).await;
+    assert_eq!(
+        result.exit,
+        ExitCode::Complete,
+        "summary: {}",
+        result.summary
+    );
+    let act = outcome(&result.summary, "activities:person");
+    assert_eq!(act["status"], "ok");
+    assert_eq!(act["consistency"], "dirty");
+    assert_eq!(act["count"], 0);
+    assert!(act["error"].as_str().unwrap().contains("circuit opened"));
+}
+
+#[tokio::test]
 async fn records_failure_is_failed_exit() {
     let clarify = MockServer::start().await;
     let bq = MockServer::start().await;

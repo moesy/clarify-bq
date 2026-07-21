@@ -214,8 +214,25 @@ async fn fetch_per_record(
         .map_err(|e| format!("spool: {e}"))?;
     let mut count = 0u64;
     let mut errors = 0u64;
+    let mut consecutive = 0u64;
     let mut last_err = String::new();
-    for rid in record_ids {
+    for (i, rid) in record_ids.iter().enumerate() {
+        // Circuit breaker: an endpoint that fails for record after record is
+        // broken for the whole object (seen live: every recurrence rule's
+        // activity feed 500s) — burning a full retry budget per record turns
+        // one broken endpoint into a quarter hour of backoff.
+        if consecutive >= FEED_BREAKER {
+            let remaining = (record_ids.len() - i) as u64;
+            errors += remaining;
+            tracing::warn!(object = %slug, kind, remaining,
+                "circuit open after {FEED_BREAKER} consecutive feed failures; \
+                 not attempting the rest");
+            last_err = format!(
+                "circuit opened after {FEED_BREAKER} consecutive failures \
+                 ({remaining} feed(s) not attempted); last: {last_err}"
+            );
+            break;
+        }
         let write = |w: &mut SpoolWriter, item: &serde_json::Value| {
             let mut row = ctx.base_row();
             row.insert("object".into(), slug.into());
@@ -237,23 +254,26 @@ async fn fetch_per_record(
             }
         };
         match stats {
-            Ok(stats) => count += stats.fetched,
+            Ok(stats) => {
+                count += stats.fetched;
+                consecutive = 0;
+            }
             Err(e) => {
                 errors += 1;
+                consecutive += 1;
                 last_err = e.to_string();
                 tracing::warn!(object = %slug, record = %rid, kind, error = %last_err,
                     "skipping one record's feed");
             }
         }
     }
-    if errors > 0 && count == 0 && errors == record_ids.len() as u64 {
-        return Err(format!(
-            "every record's {kind} feed failed; last: {last_err}"
-        ));
-    }
     let (path, _) = w.finish().map_err(|e| format!("spool: {e}"))?;
     Ok((path, count, errors, last_err))
 }
+
+/// Consecutive per-record feed failures before the rest of an object's feeds
+/// are skipped. The runs row records them as skipped (consistency: dirty).
+const FEED_BREAKER: u64 = 3;
 
 /// Fetch a flat resource (lists, users, workflows, settings, schemas snapshot,
 /// list rows) into one spool.
