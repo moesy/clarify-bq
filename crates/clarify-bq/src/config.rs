@@ -1,6 +1,7 @@
 use crate::cli::ConnArgs;
 use bq_sink::SecretRef;
 
+#[derive(Debug)]
 pub struct Config {
     pub workspace: String,
     pub project: String,

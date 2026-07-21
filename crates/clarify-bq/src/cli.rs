@@ -94,6 +94,7 @@ pub enum Command {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)] // constructed by the orchestrator (later task)
 pub enum ExitCode {
     Complete,
     Failed,
