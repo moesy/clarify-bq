@@ -41,6 +41,7 @@ impl Category {
     }
 }
 
+#[derive(Debug)]
 pub struct ResourcePlan {
     pub objects: Vec<ObjectSchema>,
     pub categories: Vec<Category>,
