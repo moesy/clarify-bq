@@ -162,6 +162,7 @@ mod tests {
         ObjectSchema {
             slug: slug.into(),
             relationships: vec![],
+            object: true,
             raw: serde_json::json!({}),
         }
     }

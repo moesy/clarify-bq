@@ -11,7 +11,12 @@ pub async fn run_objects(client: &ClarifyClient) -> (ExitCode, String) {
     match client.fetch_schemas().await {
         Ok(schemas) => {
             let mut out = String::from("object\trelationships\n");
-            for s in &schemas {
+            let mut seen: Vec<&str> = Vec::new();
+            for s in schemas.iter().filter(|s| s.object) {
+                if seen.contains(&s.slug.as_str()) {
+                    continue; // core/ and entities/ duplicates
+                }
+                seen.push(&s.slug);
                 out.push_str(&format!("{}\t{}\n", s.slug, s.relationships.join(",")));
             }
             (ExitCode::Complete, out)
@@ -94,7 +99,14 @@ pub async fn run_check(
             let client = ClarifyClient::new(clarify_base.to_string(), key, cfg.workspace.clone())
                 .map_err(|e| e.to_string())?;
             let schemas = client.fetch_schemas().await.map_err(|e| e.to_string())?;
-            Ok::<_, String>(format!("{} object schemas discovered", schemas.len()))
+            let mut slugs: Vec<&str> = schemas
+                .iter()
+                .filter(|s| s.object)
+                .map(|s| s.slug.as_str())
+                .collect();
+            slugs.sort();
+            slugs.dedup();
+            Ok::<_, String>(format!("{} record objects discovered", slugs.len()))
         };
         step(&mut report, "clarify", probe.await);
     } else {

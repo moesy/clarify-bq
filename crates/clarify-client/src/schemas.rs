@@ -3,45 +3,52 @@ use crate::{ClarifyClient, ClientError};
 
 #[derive(Debug, Clone)]
 pub struct ObjectSchema {
+    /// Object slug used in `/objects/{slug}/...` paths (from the schema `title`).
     pub slug: String,
+    /// Property names carrying `xClarifyRelationship` — the exact names the
+    /// `include=` parameter accepts (invalid names are a 400).
     pub relationships: Vec<String>,
+    /// True when this schema describes a record object
+    /// (`xClarifyNamespace == "objects"`); value/type schemas are false.
+    pub object: bool,
     pub raw: serde_json::Value,
 }
 
 fn extract(item: &serde_json::Value) -> ObjectSchema {
+    // Schema items are JSON Schema documents: the slug is `title`, objectness
+    // is `xClarifyNamespace`, and fields live under `properties`.
     let attrs = &item["attributes"];
-    let slug = attrs["entity"]
+    let object = attrs["xClarifyNamespace"] == "objects";
+    let slug = attrs["title"]
         .as_str()
-        .or_else(|| attrs["name"].as_str())
+        .filter(|s| !s.is_empty())
         .or_else(|| item["id"].as_str())
         .unwrap_or_default()
         .to_string();
-    let mut relationships: Vec<String> = attrs["fields"]
+    let mut relationships: Vec<String> = attrs["properties"]
         .as_object()
-        .map(|fields| {
-            fields
+        .map(|props| {
+            props
                 .iter()
-                .filter(|(_, v)| v["type"] == "relationship")
+                .filter(|(_, v)| v.get("xClarifyRelationship").is_some())
                 .map(|(k, _)| k.clone())
                 .collect()
         })
         .unwrap_or_default();
-    if relationships.is_empty()
-        && let Some(rels) = item["relationships"].as_object()
-    {
-        relationships = rels.keys().cloned().collect();
-    }
     relationships.sort();
     ObjectSchema {
         slug,
         relationships,
+        object,
         raw: item.clone(),
     }
 }
 
 impl ClarifyClient {
-    /// Discover every object schema. Cursor-paginated: `links.next` is followed
-    /// to exhaustion so custom objects past page one are never missed.
+    /// Discover every schema (objects and value types). Cursor-paginated:
+    /// `links.next` is followed to exhaustion so custom objects past page one
+    /// are never missed. The same object can appear under several schema URLs
+    /// (core/ and entities/) — callers dedup by slug when planning.
     pub async fn fetch_schemas(&self) -> Result<Vec<ObjectSchema>, ClientError> {
         let mut out = Vec::new();
         let mut next: Option<String> = Some("/schemas".to_string());

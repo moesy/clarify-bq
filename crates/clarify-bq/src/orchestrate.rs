@@ -386,11 +386,26 @@ pub async fn run_backup(
             products.push(lists_product);
         }
         if plan.includes(Category::ListRows) && lists_ok {
+            // Lists can reference objects with no records endpoint (e.g. the
+            // TAM feature's tam_* entities): skip those, and tolerate a
+            // per-list 404 rather than failing the whole resource.
+            // All discovered record objects, not just --objects-narrowed ones:
+            // a deal list's rows still back up when only person records do.
+            let queryable: Vec<&str> = schemas
+                .iter()
+                .filter(|s| s.object)
+                .map(|s| s.slug.as_str())
+                .collect();
             products.push(
                 fetch_flat(&ctx, "list_rows", async |w| {
                     let mut count = 0u64;
                     for (entity, list_id) in &lists {
-                        let stats = ctx
+                        if !queryable.contains(&entity.as_str()) {
+                            tracing::warn!(list = %list_id, object = %entity,
+                                "skipping list rows: object has no records endpoint");
+                            continue;
+                        }
+                        let fetched = ctx
                             .client
                             .fetch_list_rows(entity, list_id, &mut |item| {
                                 let mut row = ctx.base_row();
@@ -400,9 +415,15 @@ pub async fn run_backup(
                                 row.insert("data".into(), item.clone());
                                 w.write_row(&serde_json::Value::Object(row))
                             })
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        count += stats.fetched;
+                            .await;
+                        match fetched {
+                            Ok(stats) => count += stats.fetched,
+                            Err(ClientError::Http { status: 404, .. }) => {
+                                tracing::warn!(list = %list_id, object = %entity,
+                                    "skipping list rows: list not queryable (404)");
+                            }
+                            Err(e) => return Err(e.to_string()),
+                        }
                     }
                     Ok(count)
                 })

@@ -22,9 +22,14 @@ async fn mock_schemas(server: &MockServer) {
         .and(path("/workspaces/acme/schemas"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "data": [
-                {"type": "schema", "id": "s1", "attributes": {"entity": "person",
-                 "fields": {"company": {"type": "relationship"}}}},
-                {"type": "schema", "id": "s2", "attributes": {"entity": "deal", "fields": {}}}
+                {"type": "schema", "id": "https://example.test/schemas/core/person",
+                 "attributes": {"title": "person", "xClarifyNamespace": "objects",
+                    "properties": {"company_id": {"xClarifyRelationship": {"entity": "company"}}}}},
+                {"type": "schema", "id": "https://example.test/schemas/entities/person",
+                 "attributes": {"title": "person", "xClarifyNamespace": "objects",
+                    "properties": {"company_id": {"xClarifyRelationship": {"entity": "company"}}}}},
+                {"type": "schema", "id": "https://example.test/schemas/entities/deal",
+                 "attributes": {"title": "deal", "xClarifyNamespace": "objects", "properties": {}}}
             ],
             "links": {"next": null}
         })))
@@ -39,8 +44,13 @@ async fn objects_lists_discovered_slugs() {
     let client = ClarifyClient::new(server.uri(), "sk".into(), "acme".into()).unwrap();
     let (exit, out) = run_objects(&client).await;
     assert_eq!(exit, ExitCode::Complete);
-    assert!(out.contains("person\tcompany"));
+    assert!(out.contains("person\tcompany_id"));
     assert!(out.contains("deal"));
+    assert_eq!(
+        out.matches("person").count(),
+        1,
+        "core/entities duplicates collapsed"
+    );
 }
 
 #[tokio::test]
@@ -90,7 +100,7 @@ async fn check_reports_probes_and_fails_on_denied_dataset() {
     let (exit, report) = run_check(&cfg, &provider, &gcp.uri(), &clarify.uri(), &s).await;
     assert_eq!(exit, ExitCode::ConfigAuth, "report:\n{report}");
     assert!(report.contains("ok    secret: skipped"));
-    assert!(report.contains("ok    clarify: 2 object schemas"));
+    assert!(report.contains("ok    clarify: 2 record objects"));
     assert!(report.contains("FAIL  dataset"));
     assert!(report.contains("ok    tables"));
 }

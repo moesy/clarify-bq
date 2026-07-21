@@ -48,11 +48,29 @@ pub struct ResourcePlan {
 }
 
 impl ResourcePlan {
+    /// Build from ALL discovered schemas: value/type schemas are dropped, and
+    /// objects appearing under several schema URLs (core/ and entities/) are
+    /// deduped by slug, preferring the entities/ document.
     pub fn build(
         schemas: &[ObjectSchema],
         objects: &[String],
         skip: &[String],
     ) -> Result<ResourcePlan, String> {
+        let mut by_slug: Vec<ObjectSchema> = Vec::new();
+        for s in schemas.iter().filter(|s| s.object && !s.slug.is_empty()) {
+            match by_slug.iter_mut().find(|e| e.slug == s.slug) {
+                None => by_slug.push(s.clone()),
+                Some(existing) => {
+                    let prefer_new = s.raw["id"]
+                        .as_str()
+                        .is_some_and(|id| id.contains("/entities/"));
+                    if prefer_new {
+                        *existing = s.clone();
+                    }
+                }
+            }
+        }
+        let schemas = &by_slug;
         let known: Vec<&str> = schemas.iter().map(|s| s.slug.as_str()).collect();
         for o in objects {
             if !known.contains(&o.as_str()) {
@@ -128,9 +146,44 @@ mod tests {
             .map(|s| ObjectSchema {
                 slug: s.to_string(),
                 relationships: vec![],
+                object: true,
                 raw: serde_json::json!({}),
             })
             .collect()
+    }
+
+    #[test]
+    fn dedups_core_and_entities_schemas_preferring_entities() {
+        let core = ObjectSchema {
+            slug: "person".into(),
+            relationships: vec!["company_id".into()],
+            object: true,
+            raw: serde_json::json!({"id": "https://x/schemas/core/person"}),
+        };
+        let entities = ObjectSchema {
+            slug: "person".into(),
+            relationships: vec!["company_id".into(), "deals".into()],
+            object: true,
+            raw: serde_json::json!({"id": "https://x/schemas/entities/person"}),
+        };
+        let value_schema = ObjectSchema {
+            slug: "https://x/schemas/core/collectionOfStrings".into(),
+            relationships: vec![],
+            object: false,
+            raw: serde_json::json!({}),
+        };
+        let p = ResourcePlan::build(&[core, entities, value_schema], &[], &[]).unwrap();
+        assert_eq!(
+            p.objects.len(),
+            1,
+            "value schemas dropped, duplicates merged"
+        );
+        assert_eq!(p.objects[0].slug, "person");
+        assert_eq!(
+            p.objects[0].relationships.len(),
+            2,
+            "entities/ doc preferred"
+        );
     }
 
     #[test]

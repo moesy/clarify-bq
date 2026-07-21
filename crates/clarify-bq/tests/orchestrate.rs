@@ -32,9 +32,15 @@ async fn mock_clarify_happy(server: &MockServer) {
     Mock::given(method("GET"))
         .and(path("/workspaces/acme/schemas"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "data": [{"type": "schema", "id": "sch_1", "attributes": {
-                "entity": "person",
-                "fields": {"company": {"type": "relationship"}}
+            "data": [{"type": "schema", "id": "https://example.test/schemas/entities/person",
+                "attributes": {
+                    "title": "person",
+                    "xClarifyNamespace": "objects",
+                    "properties": {
+                        "_id": {"type": "string"},
+                        "company_id": {"type": ["string", "null"],
+                            "xClarifyRelationship": {"kind": "many-to-one", "entity": "company"}}
+                    }
             }}],
             "links": {"next": null}
         })))
