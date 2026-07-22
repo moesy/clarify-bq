@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git describe needs tags on workflow_dispatch runs
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace
       # Dependency order. Idempotent: versions already on crates.io are
